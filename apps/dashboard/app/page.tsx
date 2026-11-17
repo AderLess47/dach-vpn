@@ -17,6 +17,9 @@ export default function HomePage() {
           mit privatem Schlüsselmaterial wird mit HTTP 422 abgewiesen — vor jeder
           Validierung, Speicherung oder Protokollierung.
         </p>
+        <a className="text-sm text-sky-400 hover:text-sky-300" href="/admin">
+          → Admin-Kennzahlen
+        </a>
       </header>
 
       <DeviceConsole />
