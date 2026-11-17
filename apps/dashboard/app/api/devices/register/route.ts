@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { guardRegisterDevice, parseBearerToken } from "@dachvpn/shared";
 import { publicKeyFingerprint } from "@dachvpn/crypto";
+import { authUnavailableResponse, isAuthUnavailable } from "../../../../lib/api-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -87,7 +88,17 @@ export async function POST(request: Request) {
   });
   const { data: userData, error: userError } = await authClient.auth.getUser(accessToken);
 
-  if (userError || !userData.user) {
+  if (userError) {
+    // Nicht erreichbarer Auth-Server ist kein ungültiger Token (sonst loggen
+    // Clients bei jedem Aussetzer aus).
+    if (isAuthUnavailable(userError)) return authUnavailableResponse();
+    return NextResponse.json(
+      { code: "INVALID_TOKEN", message: "Sitzung ist ungültig oder abgelaufen." },
+      { status: 401 },
+    );
+  }
+
+  if (!userData.user) {
     return NextResponse.json(
       { code: "INVALID_TOKEN", message: "Sitzung ist ungültig oder abgelaufen." },
       { status: 401 },

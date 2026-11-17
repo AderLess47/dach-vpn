@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticate, serviceClient } from "../../../../lib/api-auth";
+import { authenticate, authUnavailableResponse, serviceClient } from "../../../../lib/api-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +26,7 @@ export async function GET(request: Request) {
       { status: 202 },
     );
   }
+  if (auth.kind === "unavailable") return authUnavailableResponse();
   if (auth.kind === "unauthenticated") {
     return NextResponse.json({ code: auth.code }, { status: 401 });
   }

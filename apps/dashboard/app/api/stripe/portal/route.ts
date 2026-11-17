@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticate, serviceClient } from "../../../../lib/api-auth";
+import { authenticate, authUnavailableResponse, serviceClient } from "../../../../lib/api-auth";
 import { appUrl, stripeClient } from "../../../../lib/stripe";
 
 export const runtime = "nodejs";
@@ -14,6 +14,7 @@ export async function POST(request: Request) {
       { status: 202 },
     );
   }
+  if (auth.kind === "unavailable") return authUnavailableResponse();
   if (auth.kind === "unauthenticated") {
     return NextResponse.json(
       { code: auth.code, message: "Für das Abo-Portal ist eine Anmeldung erforderlich." },
