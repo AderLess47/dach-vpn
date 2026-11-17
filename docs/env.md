@@ -46,17 +46,21 @@ Anbieter. Diese Liste enthält nur Namen und Zweck.
 1. **Supabase-Projekt** (Region EU, z. B. Frankfurt) → `SUPABASE_URL`,
    `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`. Der Service-Role-Key wird
    **nicht** ins Frontend gegeben.
-2. **Stripe** (Testmodus zuerst) → zwei Preise (Basis, Pi-hole Add-on) sowie
+2. **Schema einspielen**: `bun run setup:db` (Session-Pooler-String aus dem
+   Connect-Dialog) und danach `bun run db:apply` — das führt
+   `supabase/migrations/*.sql` der Reihe nach aus und merkt sich angewandte
+   Versionen. Lokal übernimmt das `supabase start`.
+3. **Stripe** (Testmodus zuerst) → zwei Preise (Basis, Pi-hole Add-on) sowie
    `STRIPE_SECRET_KEY`; das Webhook-Secret entsteht beim Anlegen des Endpoints
    (Ziel: `https://<projekt>.supabase.co/functions/v1/stripe-webhook`).
-3. **Erster VPN-Knoten**: WireGuard-Schlüsselpaar serverseitig erzeugen
+4. **Erster VPN-Knoten**: WireGuard-Schlüsselpaar serverseitig erzeugen
    (`wg genkey | tee private.key | wg pubkey > public.key`) — der **Public** Key
    geht in `WG_SERVER_PUBLIC_KEY`, der private bleibt auf dem Knoten.
-4. **IP-Pool des Knotens**: einmalig im SQL-Editor des Projekts
+5. **IP-Pool des Knotens**: einmalig im SQL-Editor des Projekts
    `select public.seed_ip_pool('node-fsn1-1', '10.8.0.0/24');`. Das `p_node_id`
    muss zu `DEFAULT_NODE_ID` passen; ohne Pool findet die Registrierung keine
    Adresse und schlägt fehl.
-5. **Resend/CI**: keine Secrets nötig; GitHub Actions nutzt den eingebauten Token.
+6. **Resend/CI**: keine Secrets nötig; GitHub Actions nutzt den eingebauten Token.
 
 ## Wo die Werte liegen
 
