@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Environment / secrets — niemals committen
+.env
+.env.*
+!.env.example
+.dev.vars
+
+# Logs / OS
+*.log
+npm-debug.log*
+.DS_Store
+
+# Test / coverage
+coverage/
+test-results/
+ci-logs/
+
+# Lokale Testdaten
+.tmp-pg/
+
+# Supabase
+supabase/.temp/
+supabase/.branches/
+
+# Angebotsdaten bleiben lokal (Kalkulation, Preise)
+angebot/

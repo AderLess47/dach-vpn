@@ -1,0 +1,35 @@
+{
+  "name": "dachvpn",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/dashboard",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "cd apps/dashboard && bun run dev",
+    "build": "cd apps/dashboard && bun run build",
+    "typecheck": "bun run typecheck:shared && bun run typecheck:crypto && bun run typecheck:dashboard",
+    "typecheck:shared": "cd packages/shared && bunx tsc -p tsconfig.json --noEmit",
+    "typecheck:crypto": "cd packages/crypto && bunx tsc -p tsconfig.json --noEmit",
+    "typecheck:dashboard": "cd apps/dashboard && bunx tsc -p tsconfig.json --noEmit",
+    "verify:angebot": "node scripts/verify-angebot.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ipam": "node scripts/ipam-loadtest.mjs",
+    "test:registration": "node scripts/registration-integration.mjs",
+    "test:rls": "node scripts/rls-test.mjs",
+    "test:subscription": "node scripts/subscription-sync-test.mjs",
+    "test:auth-route": "node scripts/auth-route-e2e.mjs",
+    "test:db": "bun run test:ipam && bun run test:registration && bun run test:rls && bun run test:subscription"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10",
+    "pg": "^8.13.1",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "trustedDependencies": [
+    "@embedded-postgres/linux-x64"
+  ]
+}

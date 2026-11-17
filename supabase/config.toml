@@ -1,0 +1,7 @@
+# Minimale lokale Supabase-Konfiguration für `supabase start` (CI + lokal).
+# Alle nicht gesetzten Werte nutzt die CLI mit ihren Defaults; Ports sind die
+# Standard-Ports des lokalen Stacks (API 54321, DB 54322).
+project_id = "dachvpn"
+
+[studio]
+enabled = false

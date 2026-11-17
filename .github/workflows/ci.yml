@@ -1,0 +1,211 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "freebuff/**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Typecheck, Tests, Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.x"
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Unit-Tests
+        run: bun run test
+      - name: Angebotszahlen gegen kalkulation.csv
+        run: bun run verify:angebot
+      - name: Build Dashboard
+        run: |
+          mkdir -p ci-logs
+          bun run build 2>&1 | tee ci-logs/next-build.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: next-build-logs
+          path: |
+            ci-logs/
+            apps/dashboard/.next/trace
+          retention-days: 7
+          if-no-files-found: warn
+
+  database:
+    name: IPAM & Registrierung (Integration)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.x"
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Datenbank-Tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: bun run test:db
+      - name: Postgres-Log sichern
+        if: failure()
+        run: |
+          mkdir -p ci-logs
+          docker logs "${{ job.services.postgres.id }}" > ci-logs/postgres.log 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: database-logs
+          path: ci-logs/
+          retention-days: 7
+          if-no-files-found: warn
+
+  auth:
+    name: Auth-Route (lokaler Supabase-Stack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.x"
+      - name: Install
+        run: bun install --frozen-lockfile
+      - uses: ./.github/actions/supabase-local
+      - name: Auth-Route gegen den Stack prüfen
+        env:
+          DEFAULT_NODE_ID: ci-node-1
+        run: |
+          set -euo pipefail
+          # SUPABASE_* kommen aus der Composite-Action `supabase-local`.
+          mkdir -p ci-logs
+
+          bun run build 2>&1 | tee ci-logs/next-build.log
+          (cd apps/dashboard && PORT=3000 nohup bun run start > /tmp/dachvpn-server.log 2>&1 &)
+
+          ready=0
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:3000/; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then
+            echo "Server ist nicht gestartet:"
+            cat /tmp/dachvpn-server.log
+            exit 1
+          fi
+
+          BASE_URL=http://127.0.0.1:3000 node scripts/auth-route-e2e.mjs 2>&1 \
+            | tee ci-logs/auth-route.log || {
+            echo "Route-Log:"
+            cat /tmp/dachvpn-server.log
+            exit 1
+          }
+      # Läuft nur, wenn ein vorheriger Schritt fehlgeschlagen ist.
+      - name: Logs einsammeln
+        if: failure()
+        run: |
+          mkdir -p ci-logs
+          cp /tmp/dachvpn-server.log ci-logs/ 2>/dev/null || true
+          # Snapshot der Action nicht überschreiben; nur nachziehen, wenn er fehlt.
+          [ -f ci-logs/supabase-status.txt ] || supabase status > ci-logs/supabase-status.txt 2>&1 || true
+          docker ps > ci-logs/docker-ps.txt 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: auth-route-logs
+          path: ci-logs/
+          retention-days: 7
+          if-no-files-found: warn
+
+  dashboard-auth:
+    name: Dashboard mit Supabase Auth (Rendering)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.x"
+      - name: Install
+        run: bun install --frozen-lockfile
+      # Startet den Stack und exportiert SUPABASE_* und NEXT_PUBLIC_*; Next
+      # inlined die NEXT_PUBLIC_*-Werte beim Build.
+      - uses: ./.github/actions/supabase-local
+      - name: Mit Auth-Konfiguration bauen und Startseite prüfen
+        run: |
+          set -euo pipefail
+          # NEXT_PUBLIC_* kommen aus der Composite-Action `supabase-local`.
+          mkdir -p ci-logs
+          bun run build 2>&1 | tee ci-logs/next-build.log
+
+          (cd apps/dashboard && PORT=3000 nohup bun run start > /tmp/dachvpn-server.log 2>&1 &)
+
+          ready=0
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:3000/; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then
+            echo "FAIL Server ist nicht gestartet"
+            cat /tmp/dachvpn-server.log
+            exit 1
+          fi
+
+          status=$(curl -s -o ci-logs/page.html -w "%{http_code}" http://127.0.0.1:3000/)
+          failures=0
+          expect_status() {
+            if [ "$status" = "200" ]; then echo "PASS Startseite antwortet mit 200";
+            else echo "FAIL Startseite antwortet mit $status"; failures=1; fi
+          }
+          expect_contains() {
+            if grep -q "$1" ci-logs/page.html; then echo "PASS $2";
+            else echo "FAIL $2"; failures=1; fi
+          }
+          expect_absent() {
+            if grep -q "$1" ci-logs/page.html; then echo "FAIL $2"; failures=1;
+            else echo "PASS $2"; fi
+          }
+
+          expect_status
+          expect_contains "Anmelden" "Auth-Formular wird server-gerendert"
+          expect_contains "E-Mail" "E-Mail-Feld ist vorhanden"
+          expect_contains "Passwort" "Passwort-Feld ist vorhanden"
+          expect_absent "Supabase Auth ist nicht konfiguriert" "kein Konfigurationshinweis (Auth ist aktiv)"
+          expect_absent "DEMO_USER_ID" "kein Demo-User-Hinweis im HTML"
+
+          [ "$failures" = "0" ] || exit 1
+          echo "Alle Prüfungen bestanden (Rendering mit Supabase Auth)."
+      - name: Logs einsammeln
+        if: failure()
+        run: |
+          mkdir -p ci-logs
+          cp /tmp/dachvpn-server.log ci-logs/ 2>/dev/null || true
+          # Snapshot der Action nicht überschreiben; nur nachziehen, wenn er fehlt.
+          [ -f ci-logs/supabase-status.txt ] || supabase status > ci-logs/supabase-status.txt 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: dashboard-auth-logs
+          path: ci-logs/
+          retention-days: 7
+          if-no-files-found: warn
