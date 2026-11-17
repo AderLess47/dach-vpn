@@ -50,9 +50,15 @@ Anbieter. Diese Liste enthält nur Namen und Zweck.
    Connect-Dialog) und danach `bun run db:apply` — das führt
    `supabase/migrations/*.sql` der Reihe nach aus und merkt sich angewandte
    Versionen. Lokal übernimmt das `supabase start`.
-3. **Stripe** (Testmodus zuerst) → zwei Preise (Basis, Pi-hole Add-on) sowie
-   `STRIPE_SECRET_KEY`; das Webhook-Secret entsteht beim Anlegen des Endpoints
-   (Ziel: `https://<projekt>.supabase.co/functions/v1/stripe-webhook`).
+3. **Stripe** (Testmodus zuerst) → zwei wiederkehrende Preise in EUR (Basis,
+   Pi-hole Add-on), `STRIPE_SECRET_KEY` und beide Preis-IDs. Webhook-Ziel ist
+   die Route im Dashboard, `<öffentliche Basis-URL>/api/stripe/webhook`, mit den
+   Events `checkout.session.completed`, `customer.subscription.created`,
+   `customer.subscription.updated`, `customer.subscription.deleted` und
+   `invoice.payment_failed`; das dort angezeigte `whsec_…` wird
+   `STRIPE_WEBHOOK_SECRET`. Lokal genügt
+   `stripe listen --forward-to 127.0.0.1:3001/api/stripe/webhook` — eine
+   Supabase-Edge-Function gibt es dafür nicht.
 4. **Erster VPN-Knoten**: WireGuard-Schlüsselpaar serverseitig erzeugen
    (`wg genkey | tee private.key | wg pubkey > public.key`) — der **Public** Key
    geht in `WG_SERVER_PUBLIC_KEY`, der private bleibt auf dem Knoten.
