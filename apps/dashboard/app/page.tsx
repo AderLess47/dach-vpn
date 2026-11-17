@@ -25,13 +25,30 @@ export default function HomePage() {
       <DeviceConsole />
 
       <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5 text-sm text-slate-400">
-        <h2 className="mb-2 font-medium text-slate-200">
-          Was dieser PoC bewusst nicht enthält
-        </h2>
+        <h2 className="mb-2 font-medium text-slate-200">Was hier noch fehlt</h2>
         <ul className="list-disc space-y-1 pl-5">
-          <li>kein Stripe-Checkout (folgt nach der Schema-Abnahme)</li>
-          <li>keine E-Mail-Vorlagen/Branding für Auth-Mails</li>
-          <li>kein Widerrufs-Endpunkt im UI (Funktion existiert serverseitig)</li>
+          <li>
+            Stripe läuft ohne konfigurierte Preise im Trockenlauf: Checkout und Portal
+            antworten dann mit HTTP 202 statt mit einer Zahlungsseite.
+          </li>
+          <li>
+            Die deutschen Auth-Mails liegen unter{" "}
+            <code className="rounded bg-slate-900 px-1 py-0.5 text-xs text-slate-300">
+              supabase/templates
+            </code>
+            , müssen aber noch im Supabase-Projekt hinterlegt werden.
+          </li>
+          <li>
+            Die Kennzahlen unter{" "}
+            <a className="text-sky-400 hover:text-sky-300" href="/admin">
+              /admin
+            </a>{" "}
+            sehen nur Konten, die in{" "}
+            <code className="rounded bg-slate-900 px-1 py-0.5 text-xs text-slate-300">
+              ADMIN_USER_IDS
+            </code>{" "}
+            stehen.
+          </li>
         </ul>
       </section>
     </main>
