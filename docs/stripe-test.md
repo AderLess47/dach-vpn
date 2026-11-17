@@ -129,3 +129,66 @@ Für den kompletten Weg Browser → Checkout → Webhook → Abo aktiv:
    `customer.subscription.updated` in der CLI-Ausgabe; danach zeigt die
    Abo-Karte „aktiv" und `stripe_events` enthält beide Events mit gesetztem
    `processed_at`.
+
+## Abo-Portal: verwalten und kündigen
+
+Der zweite Weg neben dem Checkout: die Abo-Karte bietet „Abo verwalten /
+kündigen" an, sobald in `subscriptions` eine `stripe_customer_id` steht. Der
+Button ruft `POST /api/stripe/portal`; die Route öffnet eine
+`billingPortal.sessions` für diesen Kunden mit `return_url` aus `appUrl()`.
+Ohne Kunden antwortet sie `409 NO_CUSTOMER` — dann zuerst ein Abo starten.
+
+Zum Testen:
+
+1. `NEXT_PUBLIC_APP_URL` setzen und neu bauen — sonst landet der Rücksprung aus
+   dem Portal auf der Origin, die der Server sieht, nicht auf deiner URL.
+2. `stripe listen` mit den fünf Events laufen lassen (siehe oben), sonst bleibt
+   die Kündigung in der Datenbank unsichtbar.
+3. Angemeldet mit aktivem Abo auf „Abo verwalten / kündigen" klicken. Das
+   Portal zeigt Plan, Betrag, nächste Abrechnung, Karte und Rechnungen.
+4. „Cancel subscription" → Bestätigung → „Cancels Dec 17". Danach über
+   „Return to …" zurück in die App.
+5. Erwartet: `customer.subscription.updated` in der CLI-Ausgabe mit `[200]`,
+   eine `stripe_events`-Zeile mit `processed_at`, in `subscriptions`
+   `cancel_at_period_end = true` bei weiterhin `status = active`, und die Karte
+   zeigt „17.12.2026 (gekündigt zum Periodenende)".
+
+### Falle: `cancel_at` statt `cancel_at_period_end`
+
+Neue Abos laufen mit `billing_mode.type = "flexible"`. Kündigt man sie im
+Portal zum Periodenende, setzt Stripe **nur** `cancel_at` auf den Zeitstempel
+des Periodenendes; `cancel_at_period_end` bleibt `false`. Das Feld ist seit dem
+Changelog vom 2025-05-28 als Parameter abgekündigt und laut Stripe mit den
+neuen `cancel_at`-Helfern (`min_period_end`, `max_period_end`) nicht kompatibel.
+
+Wer im Webhook nur `subscription.cancel_at_period_end` liest, sieht deshalb nie
+eine Kündigung. Typisches Fehlerbild: Das Portal meldet „Cancels Dec 17", der
+Webhook antwortet `200` ohne `error`, und trotzdem steht in der Datenbank
+`cancel_at_period_end = false` und die Karte zeigt weiter „Aktiv · 17.12.2026".
+
+Die Erkennung liegt in `isCancelAtPeriodEnd()`
+(`packages/shared/src/stripe.ts`) und wertet beides aus: gesetztes Flag **oder**
+ein `cancel_at`, das nicht nach dem Periodenende liegt. Ist das Periodenende
+unbekannt, bleibt es beim Flag.
+
+Gegenprobe bei Zweifeln direkt an der Stripe-API:
+
+```bash
+curl -s https://api.stripe.com/v1/subscriptions/sub_… -u "$STRIPE_SECRET_KEY:" \
+  | jq '{status, cancel_at, cancel_at_period_end, cancellation_details}'
+```
+
+`cancel_at` gesetzt und `cancel_at_period_end: false` heißt: flexible
+Abrechnung, die Kündigung greift — der Webhook muss `cancel_at` auswerten.
+
+### Aufräumen
+
+Eine Kündigung zum Periodenende lässt das Abo bis zum Periodenende aktiv. Für
+einen sauberen Testbestand den Testkunden löschen (Dashboard → Customers →
+Delete) — das beendet das Abo sofort und liefert
+`customer.subscription.deleted`. Danach die `stripe_events`-Zeilen aus dem
+eigenen Lauf entfernen:
+
+```sql
+delete from public.stripe_events where event_id = 'evt_…';
+```
