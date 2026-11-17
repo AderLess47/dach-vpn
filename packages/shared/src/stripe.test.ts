@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   HANDLED_STRIPE_EVENTS,
+  isCancelAtPeriodEnd,
   isHandledStripeEvent,
   mapSubscriptionStatus,
 } from "./stripe";
@@ -30,6 +31,64 @@ describe("mapSubscriptionStatus", () => {
     expect(mapSubscriptionStatus(undefined)).toBeNull();
     expect(mapSubscriptionStatus("paused")).toBeNull();
     expect(mapSubscriptionStatus("")).toBeNull();
+  });
+});
+
+describe("isCancelAtPeriodEnd", () => {
+  // Werte aus einem echten Portal-Lauf (billing_mode: flexible): gekündigt am
+  // 17.11.2026, Periodenende 17.12.2026.
+  const periodEnd = 1797534826;
+
+  it("erkennt das klassische Flag", () => {
+    expect(
+      isCancelAtPeriodEnd({ cancel_at_period_end: true, cancel_at: null, period_end: periodEnd }),
+    ).toBe(true);
+  });
+
+  it("erkennt flexible Abos über cancel_at am Periodenende", () => {
+    expect(
+      isCancelAtPeriodEnd({
+        cancel_at_period_end: false,
+        cancel_at: periodEnd,
+        period_end: periodEnd,
+      }),
+    ).toBe(true);
+  });
+
+  it("erkennt ein cancel_at vor dem Periodenende", () => {
+    expect(
+      isCancelAtPeriodEnd({
+        cancel_at_period_end: false,
+        cancel_at: periodEnd - 86_400,
+        period_end: periodEnd,
+      }),
+    ).toBe(true);
+  });
+
+  it("wertet ein cancel_at nach dem Periodenende nicht als Kündigung zum Periodenende", () => {
+    expect(
+      isCancelAtPeriodEnd({
+        cancel_at_period_end: false,
+        cancel_at: periodEnd + 86_400,
+        period_end: periodEnd,
+      }),
+    ).toBe(false);
+  });
+
+  it("meldet ohne Kündigung false", () => {
+    expect(
+      isCancelAtPeriodEnd({ cancel_at_period_end: false, cancel_at: null, period_end: periodEnd }),
+    ).toBe(false);
+    expect(isCancelAtPeriodEnd({})).toBe(false);
+  });
+
+  it("bleibt ohne Periodenende beim Flag", () => {
+    expect(
+      isCancelAtPeriodEnd({ cancel_at_period_end: false, cancel_at: periodEnd, period_end: null }),
+    ).toBe(false);
+    expect(
+      isCancelAtPeriodEnd({ cancel_at_period_end: true, cancel_at: periodEnd, period_end: null }),
+    ).toBe(true);
   });
 });
 

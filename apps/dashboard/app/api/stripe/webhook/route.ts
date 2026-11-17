@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { isHandledStripeEvent, mapSubscriptionStatus } from "@dachvpn/shared";
+import { isCancelAtPeriodEnd, isHandledStripeEvent, mapSubscriptionStatus } from "@dachvpn/shared";
 import { serviceClient } from "../../../../lib/api-auth";
 import { stripeClient, stripePrices } from "../../../../lib/stripe";
 
@@ -106,6 +106,8 @@ export async function POST(request: Request) {
       ? subscription.items.data.some((item) => item.price?.id === piholePrice)
       : false;
 
+    const periodEndSeconds = subscriptionPeriodEndSeconds(subscription);
+
     const { error } = await admin!.rpc("apply_subscription_state", {
       p_user_id: userId,
       p_customer_id:
@@ -115,8 +117,13 @@ export async function POST(request: Request) {
       p_subscription_id: subscription.id,
       p_status: status,
       p_pihole: piholeActive,
-      p_period_end: periodEnd(subscription),
-      p_cancel_at_period_end: subscription.cancel_at_period_end === true,
+      p_period_end: periodEndSeconds === null ? null : new Date(periodEndSeconds * 1000).toISOString(),
+      // Flexible Abos setzen beim Kündigen nur `cancel_at`, nicht das Flag.
+      p_cancel_at_period_end: isCancelAtPeriodEnd({
+        cancel_at_period_end: subscription.cancel_at_period_end,
+        cancel_at: subscription.cancel_at,
+        period_end: periodEndSeconds,
+      }),
     });
 
     if (error) throw new Error(error.message);
@@ -148,14 +155,14 @@ export async function POST(request: Request) {
   }
 }
 
-/** Periodenende liegt pro Item; maßgeblich ist das späteste Datum. */
-function periodEnd(subscription: Stripe.Subscription): string | null {
+/** Periodenende liegt pro Item; maßgeblich ist das späteste Datum (Unix-Sekunden). */
+function subscriptionPeriodEndSeconds(subscription: Stripe.Subscription): number | null {
   const stamps = subscription.items.data
     .map((item) => item.current_period_end)
     .filter((value): value is number => typeof value === "number");
 
   if (stamps.length === 0) return null;
-  return new Date(Math.max(...stamps) * 1000).toISOString();
+  return Math.max(...stamps);
 }
 
 /** Die Subscription-ID am Invoice hat in neueren API-Versionen zwei Orte. */
