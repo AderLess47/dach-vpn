@@ -62,7 +62,7 @@ eval "$(supabase status -o env)"
 export SUPABASE_URL="http://${API_URL#http://}" \
        SUPABASE_ANON_KEY="$ANON_KEY" \
        SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" \
-       DEFAULT_NODE_ID=ci-node-1
+       DEFAULT_NODE_ID=ci-node-1   # Knoten, unter dem der Test den Pool anlegt
 
 # 3. Job `auth`: bauen, starten, Route gegen den Stack prüfen
 bun run build
@@ -73,6 +73,12 @@ BASE_URL=http://127.0.0.1:3000 bun run test:auth-route
 Der Job `auth` prüft 20 Punkte: 401 ohne bzw. mit falschem Token, 422 bei
 privatem Schlüssel, 201 mit Adresse aus dem Pool, den Retry, das Gerätelimit und
 dass jeder Nutzer per RLS nur seine eigenen Geräte sieht.
+
+Den IP-Pool legt der Test selbst an: `scripts/auth-route-e2e.mjs` ruft
+`seed_ip_pool` mit `DEFAULT_NODE_ID` und `AUTH_E2E_CIDR` auf (Default
+`10.9.0.0/27`). In CI muss also nichts vorbereitet werden. Für ein echtes
+Supabase-Projekt ist das ein einmaliger Schritt von Hand — Pool-CIDR und
+Knoten-ID aus [`docs/env.md`](docs/env.md), Punkt 4.
 
 ```bash
 # 4. Job `dashboard-auth`: mit Auth-Konfiguration neu bauen und prüfen
