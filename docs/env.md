@@ -11,7 +11,7 @@ Anbieter. Diese Liste enthält nur Namen und Zweck.
 | `NEXT_PUBLIC_APP_NAME` | Anzeigename im Dashboard | Sprint 0 |
 | `NEXT_PUBLIC_APP_URL` | Öffentliche Basis-URL für Checkout-Rücksprünge | M1 (Abo) |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase-Projekt-URL für Client-Calls | M1 (Auth) |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Öffentlicher Anon-Key (RLS schützt die Daten) | M1 |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Öffentlicher Anon-Key (RLS schützt die Daten) | M1 (Auth) |
 | `NEXT_PUBLIC_WG_SERVER_PUBLIC_KEY` | Public Key des Knotens für die Config-Vorschau | Sprint 0 (optional) |
 | `NEXT_PUBLIC_WG_ENDPOINT` | `host:port` des Knotens für die Config | Sprint 0 (optional) |
 
