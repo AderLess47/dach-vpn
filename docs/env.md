@@ -11,7 +11,7 @@ Anbieter. Diese Liste enthält nur Namen und Zweck.
 | `NEXT_PUBLIC_APP_NAME` | Anzeigename im Dashboard | Sprint 0 |
 | `NEXT_PUBLIC_APP_URL` | Öffentliche Basis-URL für Checkout-Rücksprünge | M1 (Abo) |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase-Projekt-URL für Client-Calls | M1 (Auth) |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Öffentlicher Anon-Key (RLS schützt die Daten) | M1 (Auth) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Öffentlicher Anon-Key (RLS schützt die Daten) | M1 |
 | `NEXT_PUBLIC_WG_SERVER_PUBLIC_KEY` | Public Key des Knotens für die Config-Vorschau | Sprint 0 (optional) |
 | `NEXT_PUBLIC_WG_ENDPOINT` | `host:port` des Knotens für die Config | Sprint 0 (optional) |
 
@@ -58,7 +58,8 @@ Anbieter. Diese Liste enthält nur Namen und Zweck.
    `invoice.payment_failed`; das dort angezeigte `whsec_…` wird
    `STRIPE_WEBHOOK_SECRET`. Lokal genügt
    `stripe listen --forward-to 127.0.0.1:3001/api/stripe/webhook` — eine
-   Supabase-Edge-Function gibt es dafür nicht.
+   Supabase-Edge-Function gibt es dafür nicht. Ausführliche Anleitung mit
+   Preisprüfungen, Fehlerfällen und Aufräum-SQL: [`stripe-test.md`](stripe-test.md).
 4. **Erster VPN-Knoten**: WireGuard-Schlüsselpaar serverseitig erzeugen
    (`wg genkey | tee private.key | wg pubkey > public.key`) — der **Public** Key
    geht in `WG_SERVER_PUBLIC_KEY`, der private bleibt auf dem Knoten.
