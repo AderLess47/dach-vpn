@@ -52,7 +52,11 @@ Anbieter. Diese Liste enthält nur Namen und Zweck.
 3. **Erster VPN-Knoten**: WireGuard-Schlüsselpaar serverseitig erzeugen
    (`wg genkey | tee private.key | wg pubkey > public.key`) — der **Public** Key
    geht in `WG_SERVER_PUBLIC_KEY`, der private bleibt auf dem Knoten.
-4. **Resend/CI**: keine Secrets nötig; GitHub Actions nutzt den eingebauten Token.
+4. **IP-Pool des Knotens**: einmalig im SQL-Editor des Projekts
+   `select public.seed_ip_pool('node-fsn1-1', '10.8.0.0/24');`. Das `p_node_id`
+   muss zu `DEFAULT_NODE_ID` passen; ohne Pool findet die Registrierung keine
+   Adresse und schlägt fehl.
+5. **Resend/CI**: keine Secrets nötig; GitHub Actions nutzt den eingebauten Token.
 
 ## Wo die Werte liegen
 
