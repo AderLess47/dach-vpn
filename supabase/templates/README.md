@@ -18,8 +18,24 @@ gelten ab der Projektwurzel.
 ## Gehostetes Projekt
 
 Die Dashboard-Vorlagen sind von der Konfigurationsdatei getrennt. Pro Mail:
-**Supabase → Authentication → Email Templates**, Vorlage wählen, Betreff aus der
-Tabelle oben eintragen und den Inhalt der HTML-Datei einfügen.
+**Supabase → Authentication → Email Templates**, Eintrag wählen, Betreff aus der
+Tabelle oben eintragen und den Inhalt der HTML-Datei einfügen — die komplette
+Datei von `<!doctype html>` bis `</html>`, nicht nur den sichtbaren Text. Dann
+**Save**; die nächste Registrierung bzw. der nächste Reset verschickt die
+deutsche Fassung. Bereits verschickte Mails ändern sich nicht.
+
+| Eintrag im Dashboard | Datei | Betreff |
+|---|---|---|
+| Confirm signup | `confirmation.html` | Bestätige deine E-Mail-Adresse |
+| Reset password | `reset-password.html` | Passwort zurücksetzen |
+
+Zum Kopieren genügt `cat supabase/templates/confirmation.html` (bzw.
+`reset-password.html`).
+
+Die Links stammen aus `{{ .ConfirmationURL }}` und werden gegen die `site_url`
+des Projekts gebaut. Steht dort noch `http://localhost:3000`, führt der Klick
+ins Leere — `site_url` und `uri_allow_list` gehören deshalb mit den Vorlagen
+gesetzt (**Authentication → URL Configuration**).
 
 ## Variablen
 

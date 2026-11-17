@@ -69,6 +69,45 @@ Anbieter. Diese Liste enthält nur Namen und Zweck.
    Adresse und schlägt fehl.
 6. **Resend/CI**: keine Secrets nötig; GitHub Actions nutzt den eingebauten Token.
 
+## Admin-Zugang (ADMIN_USER_IDS)
+
+`/admin` und `/api/admin/metrics` hängen an einer Allowlist von Nutzer-IDs,
+nicht an einer eigenen Rolle im Schema.
+
+1. **IDs holen**: Supabase → *Authentication → Users*, dort die UUID des
+   Kontos kopieren — nicht die E-Mail-Adresse, die Route vergleicht die
+   `sub`-ID aus dem Token.
+2. **Eintragen**: `ADMIN_USER_IDS` in `apps/dashboard/.env.local`,
+   kommasepariert, Leerzeichen werden toleriert: `ADMIN_USER_IDS=<uuid>` oder
+   `ADMIN_USER_IDS=<uuid>,<uuid>`. Server-seitig, also **kein**
+   `NEXT_PUBLIC_`-Präfix; der Wert gehört nicht ins Browser-Bundle.
+3. **Neustart**: `.env.local` wird beim Start des Servers gelesen. Ein `build`
+   ist nicht nötig, ein Neustart von `next start` schon. Zusätzlich muss
+   `SUPABASE_SERVICE_ROLE_KEY` gesetzt sein — die RPC `admin_metrics` ist nur
+   für `service_role` ausführbar.
+4. **Format prüfen**: `bun run check:env` zeigt `ADMIN_USER_IDS` mit
+   gesetzt/leer, Quelle und Länge, nie den Wert. Als plausibel gilt nur eine
+   kommaseparierte Liste 36-stelliger UUIDs. Ist die Variable leer, hat
+   **niemand** Zugriff: die Route antwortet für jedes Konto mit `403`.
+5. **Zugriff prüfen**: mit genau diesem Konto anmelden und `/admin` öffnen.
+   Gegenprobe per HTTP mit dem Session-Token:
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' \
+     -H "Authorization: Bearer $ACCESS_TOKEN" \
+     http://127.0.0.1:3001/api/admin/metrics
+   ```
+
+   `200` heißt in der Liste, `403` heißt nicht (`ADMIN_REQUIRED`, die Seite
+   schreibt „Dieses Konto steht nicht in ADMIN_USER_IDS“), `401` heißt Token
+   ungültig, `202` heißt Supabase nicht konfiguriert, `503` heißt Auth gerade
+   nicht erreichbar — dann bleibt die Sitzung gültig und der Versuch ist
+   wiederholbar.
+
+Die Antwort trägt `cache-control: no-store, private` und enthält nur Zähler:
+Abos je Status, Geräte und der IP-Pool je Knoten. Keine Nutzer-IDs, keine
+E-Mails, keine IP-Adressen.
+
 ## Wo die Werte liegen
 
 | Umgebung | Ablage |
