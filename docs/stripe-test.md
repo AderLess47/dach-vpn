@@ -113,8 +113,8 @@ delete from public.stripe_events where event_id like 'evt_smoke_%';
 | `SKIP Webhook: Route meldet STRIPE_NOT_CONFIGURED` (202) | Server läuft noch ohne Stripe-Env — neu starten |
 | `Webhook akzeptiert gültige Signatur` schlägt fehl, Status 400 | Server hat ein anderes `STRIPE_WEBHOOK_SECRET` als der Aufruf (z. B. altes `whsec_` aus einer früheren `stripe listen`-Sitzung) |
 | `PROCESSING_FAILED` / Status 500 | meist ein Fremdschlüssel- oder RPC-Problem — `SMOKE_USER_ID` prüfen, Migrationen 0001–0005 eingespielt? |
-| `409 NO_CUSTOMER` beim Klick auf „Abo verwalten" | In `subscriptions` fehlt die `stripe_customer_id` — das Konto hat noch kein Abo; zuerst eines starten (Portal öffnet sich erst mit Kunde) |
-| Portal meldet „Cancels Dec 17", die Datenbank bleibt aber `cancel_at_period_end = false` | Flexible Abrechnung: Stripe setzt nur `cancel_at`, das Flag bleibt `false` — der Webhook muss beides auswerten, siehe „Abo-Portal" |
+| `409 NO_CUSTOMER` beim Klick auf „Abo verwalten“ | In `subscriptions` fehlt die `stripe_customer_id` — das Konto hat noch kein Abo; zuerst eines starten (Portal öffnet sich erst mit Kunde) |
+| Portal meldet „Cancels Dec 17“, die Datenbank bleibt aber `cancel_at_period_end = false` | Flexible Abrechnung: Stripe setzt nur `cancel_at`, das Flag bleibt `false` — der Webhook muss beides auswerten, siehe „Abo-Portal“ |
 
 ## Echter Rundlauf (optional)
 
