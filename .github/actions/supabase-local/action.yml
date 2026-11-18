@@ -1,0 +1,49 @@
+name: Supabase lokal
+description: >-
+  Startet den Supabase-Lokalstack und stellt die Auth-Zugangsdaten als
+  Umgebungsvariablen bereit (SUPABASE_* und NEXT_PUBLIC_*).
+
+runs:
+  using: composite
+  steps:
+    - uses: supabase/setup-cli@v3
+      with:
+        version: latest
+
+    # `supabase start` spielt supabase/migrations beim ersten Start ein.
+    - name: Stack starten
+      shell: bash
+      run: supabase start
+
+    # Die Werte landen in $GITHUB_ENV, damit spätere Schritte sie ohne erneutes
+    # `eval` sehen. Die Anführungszeichen aus `supabase status -o env` müssen
+    # weg, sonst stehen sie im Wert.
+    - name: Zugangsdaten exportieren
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p ci-logs
+        supabase status -o env > ci-logs/supabase-status.txt
+        sed -E 's/^([A-Za-z0-9_]+)="(.*)"$/\1=\2/' ci-logs/supabase-status.txt >> "$GITHUB_ENV"
+
+        read_value() {
+          sed -nE "s/^$1=\"?([^\"]*)\"?$/\1/p" ci-logs/supabase-status.txt | head -n1
+        }
+
+        # Ältere CLI-Versionen geben API_URL ohne Schema aus.
+        api_url=$(read_value API_URL)
+        case "$api_url" in
+          http*) ;;
+          *) api_url="http://$api_url" ;;
+        esac
+
+        anon_key=$(read_value ANON_KEY)
+        service_key=$(read_value SERVICE_ROLE_KEY)
+
+        {
+          echo "SUPABASE_URL=$api_url"
+          echo "NEXT_PUBLIC_SUPABASE_URL=$api_url"
+          echo "SUPABASE_ANON_KEY=$anon_key"
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$anon_key"
+          echo "SUPABASE_SERVICE_ROLE_KEY=$service_key"
+        } >> "$GITHUB_ENV"

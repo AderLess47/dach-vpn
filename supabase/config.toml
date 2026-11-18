@@ -1,0 +1,19 @@
+# Minimale lokale Supabase-Konfiguration für `supabase start` (CI + lokal).
+# Alle nicht gesetzten Werte nutzt die CLI mit ihren Defaults; Ports sind die
+# Standard-Ports des lokalen Stacks (API 54321, DB 54322).
+project_id = "dachvpn"
+
+[studio]
+enabled = false
+
+# Auth-Mails auf Deutsch. Die Pfade gelten ab der Projektwurzel und wirken für
+# den lokalen Stack (`supabase start`, Inbucket). Für das gehostete Projekt
+# werden dieselben Dateien im Dashboard unter Auth → Email Templates eingefügt —
+# siehe supabase/templates/README.md.
+[auth.email.template.confirmation]
+subject = "Bestätige deine E-Mail-Adresse"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "Passwort zurücksetzen"
+content_path = "./supabase/templates/reset-password.html"
