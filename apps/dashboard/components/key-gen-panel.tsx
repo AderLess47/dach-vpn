@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   buildWireguardConfig,
   generateDeviceKeyPair,
@@ -10,6 +10,7 @@ import {
   type DeviceKeyPair,
 } from "@dachvpn/crypto";
 import { PLATFORMS, type Platform } from "@dachvpn/shared";
+import { supabaseBrowser } from "../lib/supabase-browser";
 
 interface RegisterResponse {
   persisted?: boolean;
@@ -17,6 +18,12 @@ interface RegisterResponse {
   code?: string;
   message?: string;
   device?: { id: string; assignedIp: string | null; reused: boolean };
+}
+
+interface DeviceOption {
+  id: string;
+  name: string;
+  assignedIp: string | null;
 }
 
 const PLATFORM_LABELS: Record<Platform, string> = {
@@ -58,6 +65,46 @@ export function KeyGenPanel({
   const [result, setResult] = useState<RegisterResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloaded, setDownloaded] = useState(false);
+  const [devices, setDevices] = useState<DeviceOption[]>([]);
+  const [deviceId, setDeviceId] = useState("");
+  const [devicesVersion, setDevicesVersion] = useState(0);
+
+  const selectedDevice = devices.find((device) => device.id === deviceId) ?? null;
+  // Adresse bevorzugt aus der Geräteliste: sie überlebt einen Reload, die
+  // Antwort der Registrierung nicht.
+  const clientAddress = wireguardClientAddress(
+    selectedDevice?.assignedIp ?? result?.device?.assignedIp,
+  );
+
+  // Eigene Geräte für die Auswahl laden; RLS liefert nur die des Kontos.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDevices() {
+      if (!supabaseBrowser || !accessToken) {
+        if (!cancelled) setDevices([]);
+        return;
+      }
+
+      const { data } = await supabaseBrowser
+        .from("devices")
+        .select("id, name, assigned_ip, status")
+        .eq("status", "active")
+        .order("created_at", { ascending: false });
+
+      if (cancelled) return;
+      const rows =
+        (data as { id: string; name: string; assigned_ip: string | null }[] | null) ?? [];
+      setDevices(
+        rows.map((row) => ({ id: row.id, name: row.name, assignedIp: row.assigned_ip })),
+      );
+    }
+
+    void loadDevices();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, devicesVersion]);
 
   function handleGenerate() {
     setError(null);
@@ -80,32 +127,42 @@ export function KeyGenPanel({
     setError(null);
     setResult(null);
 
-    // Bewusst explizit aufgebaut: der Request enthält genau diese vier Felder.
+    // Zwei Wege: an ein bestehendes Gerät binden (dann zählt nur der neue
+    // Public Key, Adresse und Name bleiben) oder ein neues Gerät anlegen.
+    // Bewusst explizit aufgebaut: der Request enthält genau diese Felder.
     // Der private Schlüssel existiert in dieser Funktion nicht als Variable,
     // die in den Body gelangen könnte.
-    const payload = {
-      name,
-      platform,
-      publicKey: pair.publicKeyBase64,
-      piholeEnabled,
-    };
+    const payload = selectedDevice
+      ? { deviceId: selectedDevice.id, publicKey: pair.publicKeyBase64 }
+      : {
+          name,
+          platform,
+          publicKey: pair.publicKeyBase64,
+          piholeEnabled,
+        };
 
     try {
-      const response = await fetch("/api/devices/register", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+      const response = await fetch(
+        selectedDevice ? "/api/devices/rebind" : "/api/devices/register",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-      });
+      );
       const data = (await response.json()) as RegisterResponse;
       if (!response.ok) {
         setError(`${response.status} ${data.code ?? "FEHLER"}: ${data.message ?? "Unbekannter Fehler"}`);
         setResult(data);
       } else {
         setResult(data);
-        if (data.persisted) onRegistered?.();
+        if (data.persisted) {
+          onRegistered?.();
+          setDevicesVersion((value) => value + 1);
+        }
       }
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : "Netzwerkfehler");
@@ -120,12 +177,11 @@ export function KeyGenPanel({
       return;
     }
 
-    // Die Adresse kommt ausschließlich aus der Registrierungsantwort des Servers:
+    // Die Adresse kommt aus der Geräteliste bzw. aus der Antwort des Servers:
     // ohne vergebene Adresse gibt es keine gültige Tunnel-Konfiguration.
-    const address = wireguardClientAddress(result?.device?.assignedIp);
-    if (!address) {
+    if (!clientAddress) {
       setError(
-        "Für den Config-Download muss das Gerät registriert sein — die Client-Adresse vergibt der Pool erst bei der Registrierung.",
+        "Für den Config-Download muss das Gerät registriert sein — die Client-Adresse vergibt der Pool erst dabei.",
       );
       return;
     }
@@ -143,7 +199,7 @@ export function KeyGenPanel({
     try {
       const config = buildWireguardConfig({
         privateKeyBase64: pair.privateKeyBase64,
-        address,
+        address: clientAddress,
         serverPublicKeyBase64: serverPublicKey,
         endpoint,
         piholeActive: piholeEnabled,
@@ -200,6 +256,40 @@ export function KeyGenPanel({
           </label>
         </div>
 
+        {devices.length > 0 && (
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-300">Ziel</span>
+            <select
+              value={deviceId}
+              onChange={(event) => {
+                setDeviceId(event.target.value);
+                setResult(null);
+                setDownloaded(false);
+                setError(null);
+              }}
+              className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
+            >
+              <option value="">— neues Gerät anlegen —</option>
+              {devices.map((device) => (
+                <option key={device.id} value={device.id}>
+                  {device.name} · {device.assignedIp ?? "keine Adresse"}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {selectedDevice && (
+          <p className="text-xs text-slate-400">
+            Der neue Public Key ersetzt den bisherigen; Name, Plattform,
+            Pi-hole-Einstellung und die Adresse{" "}
+            <span className="font-mono text-slate-200">
+              {selectedDevice.assignedIp ?? "—"}
+            </span>{" "}
+            bleiben unverändert.
+          </p>
+        )}
+
         <label className="flex items-center gap-2 text-sm text-slate-300">
           <input
             type="checkbox"
@@ -223,7 +313,11 @@ export function KeyGenPanel({
             disabled={busy || !pair}
             className="rounded-md bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {busy ? "Registriere…" : "Public Key registrieren"}
+            {busy
+              ? "Registriere…"
+              : selectedDevice
+                ? "Neuen Key an Gerät binden"
+                : "Public Key registrieren"}
           </button>
           <button
             type="button"
