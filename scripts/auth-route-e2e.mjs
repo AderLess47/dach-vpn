@@ -3,11 +3,13 @@
  * Prüft die Auth-Route gegen einen echten Supabase-Stack (in CI: `supabase start`).
  *
  * Ablauf:
- *   1. Pool über die Service-Role-RPC füllen (der Stack kennt keine Fixtures).
- *   2. Zwei Nutzer über die Admin-API anlegen und per Passwort einloggen.
+ *   1. Pool über die Service-Rolle-RPC füllen (der Stack kennt keine Fixtures).
+ *   2. Nutzer über die Admin-API anlegen und per Passwort einloggen.
  *   3. Route ohne Token, mit falschem Token, mit privatem Schlüssel aufrufen.
  *   4. Mit gültigem Token registrieren, Retry prüfen, RLS-Sicht prüfen.
- *   5. Gerätelimit des Kontos prüfen.
+ *   5. Schlüsselwechsel an einem bestehenden Gerät prüfen: die Adresse bleibt,
+ *      fremde und widerrufene Geräte werden abgewiesen.
+ *   6. Gerätelimit des Kontos prüfen.
  *
  * Benötigt: BASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY,
  * SUPABASE_SERVICE_ROLE_KEY, DEFAULT_NODE_ID.
@@ -125,9 +127,31 @@ async function register(accessToken, payload) {
   });
 }
 
+async function rebind(accessToken, payload) {
+  return request(`${BASE_URL}/api/devices/rebind`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+async function revoke(accessToken, deviceId) {
+  return request(`${BASE_URL}/api/devices/revoke`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ deviceId }),
+  });
+}
+
 async function visibleDevices(accessToken, filter = "") {
   const { status, body } = await request(
-    `${SUPABASE_URL}/rest/v1/devices?select=id,user_id${filter}`,
+    `${SUPABASE_URL}/rest/v1/devices?select=id,user_id,assigned_ip${filter}`,
     {
       headers: { apikey: ANON_KEY, authorization: `Bearer ${accessToken}` },
     },
@@ -207,6 +231,21 @@ async function main() {
     "Retry liefert dieselbe Geräte-ID",
   );
 
+  console.log("→ Schlüsselwechsel an einem bestehenden Gerät");
+  const rebound = await rebind(tokenA, {
+    deviceId: deviceA?.id,
+    publicKey: newPublicKey(),
+  });
+  check(
+    rebound.status === 200 && rebound.body?.device?.id === deviceA?.id,
+    `Eigener Schlüsselwechsel → 200 mit derselben Geräte-ID (${rebound.status})`,
+  );
+  check(
+    rebound.body?.device?.assignedIp === deviceA?.assignedIp &&
+      typeof deviceA?.assignedIp === "string",
+    `Schlüsselwechsel lässt die Adresse unverändert (${deviceA?.assignedIp} → ${rebound.body?.device?.assignedIp})`,
+  );
+
   console.log("→ RLS: jeder sieht nur seine Geräte");
   const devicesOfA = await visibleDevices(tokenA);
   check(
@@ -221,6 +260,23 @@ async function main() {
   });
   const deviceB = createdB.body?.device;
   check(createdB.status === 201, `Nutzer B registriert eigenes Gerät (${createdB.status})`);
+
+  const foreignRebind = await rebind(tokenA, {
+    deviceId: deviceB?.id,
+    publicKey: newPublicKey(),
+  });
+  check(
+    foreignRebind.status === 404 && foreignRebind.body?.code === "DEVICE_NOT_FOUND",
+    `Fremdes Gerät umschlüsseln → 404 DEVICE_NOT_FOUND (${foreignRebind.status} ${foreignRebind.body?.code})`,
+  );
+
+  const devicesOfB = await visibleDevices(tokenB);
+  check(
+    Array.isArray(devicesOfB) &&
+      devicesOfB.length === 1 &&
+      devicesOfB[0].assigned_ip === deviceB?.assignedIp,
+    "Gerät von B bleibt nach dem abgewiesenen Wechsel unverändert",
+  );
 
   const devicesOfAAfterB = await visibleDevices(tokenA);
   check(
@@ -253,6 +309,31 @@ async function main() {
   check(
     lastStatus === 409 && lastBody?.code === "DEVICE_LIMIT_REACHED",
     `Sechstes Gerät → 409 DEVICE_LIMIT_REACHED (${lastStatus} ${lastBody?.code})`,
+  );
+
+  console.log("→ Widerrufenes Gerät nimmt keinen neuen Schlüssel an");
+  const emailD = `auth-e2e-${run}-d@example.invalid`;
+  await createUser(emailD);
+  const tokenD = await signIn(emailD);
+  const createdD = await register(tokenD, {
+    name: "E2E D",
+    platform: "web",
+    publicKey: newPublicKey(),
+  });
+  const deviceD = createdD.body?.device;
+  const revokedD = await revoke(tokenD, deviceD?.id);
+  check(
+    createdD.status === 201 && revokedD.status === 200,
+    `Gerät von D registriert und widerrufen (${createdD.status}/${revokedD.status})`,
+  );
+
+  const revokedRebind = await rebind(tokenD, {
+    deviceId: deviceD?.id,
+    publicKey: newPublicKey(),
+  });
+  check(
+    revokedRebind.status === 409 && revokedRebind.body?.code === "DEVICE_REVOKED",
+    `Widerrufenes Gerät umschlüsseln → 409 DEVICE_REVOKED (${revokedRebind.status} ${revokedRebind.body?.code})`,
   );
 
   console.log("");

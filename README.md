@@ -70,9 +70,11 @@ bun run build
 BASE_URL=http://127.0.0.1:3000 bun run test:auth-route
 ```
 
-Der Job `auth` prüft 20 Punkte: 401 ohne bzw. mit falschem Token, 422 bei
-privatem Schlüssel, 201 mit Adresse aus dem Pool, den Retry, das Gerätelimit und
-dass jeder Nutzer per RLS nur seine eigenen Geräte sieht.
+Der Job `auth` prüft 26 Punkte: 401 ohne bzw. mit falschem Token, 422 bei
+privatem Schlüssel, 201 mit Adresse aus dem Pool, den Retry, den Schlüsselwechsel
+an einem bestehenden Gerät (die Adresse bleibt, fremde und widerrufene Geräte
+werden abgewiesen), das Gerätelimit und dass jeder Nutzer per RLS nur seine
+eigenen Geräte sieht.
 
 Den IP-Pool legt der Test selbst an: `scripts/auth-route-e2e.mjs` ruft
 `seed_ip_pool` mit `DEFAULT_NODE_ID` und `AUTH_E2E_CIDR` auf (Default
@@ -113,7 +115,7 @@ Vier Jobs in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), alle auf
 | --- | --- | --- |
 | `quality` | Typecheck, Unit-Tests, Angebotszahlen, `next build` | `next-build-logs` — Build-Log und `apps/dashboard/.next/trace` |
 | `database` | `bun run test:db` gegen einen `postgres:16`-Service: IPAM, Registrierung, RLS | `database-logs` — Container-Log der Datenbank |
-| `auth` | Lokaler Supabase-Stack, Build, Serverstart, `scripts/auth-route-e2e.mjs` (20 Prüfungen) | `auth-route-logs` — E2E-Ausgabe, Build- und Server-Log, `supabase status`, `docker ps` |
+| `auth` | Lokaler Supabase-Stack, Build, Serverstart, `scripts/auth-route-e2e.mjs` (26 Prüfungen) | `auth-route-logs` — E2E-Ausgabe, Build- und Server-Log, `supabase status`, `docker ps` |
 | `dashboard-auth` | Lokaler Supabase-Stack, Build mit `NEXT_PUBLIC_*`, sechs Render-Prüfungen der Startseite | `dashboard-auth-logs` — `page.html`, Build- und Server-Log, `supabase status` |
 
 Artefakte entstehen nur bei Fehlschlag (`if: failure()`), liegen 7 Tage bereit
