@@ -25,6 +25,9 @@ jobs:
       - name: Unit-Tests
         run: bun run test
       - name: Angebotszahlen gegen kalkulation.csv
+        # angebot/ steht in .gitignore (kaufmaennische Daten bleiben lokal), in CI
+        # fehlt die Kalkulationsbasis. Ohne CSV waere der Schritt immer rot.
+        if: hashFiles('angebot/kalkulation.csv') != ''
         run: bun run verify:angebot
       - name: Build Dashboard
         run: |
