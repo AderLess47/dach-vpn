@@ -1,0 +1,2 @@
+Wegwerf-Datei: prueft, ob der Doku-Links-Check auch an einem PR ohne
+Doku-Aenderung als Status erscheint. Wird mit dem Branch geloescht.
