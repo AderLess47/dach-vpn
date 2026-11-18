@@ -115,6 +115,31 @@ delete from public.stripe_events where event_id like 'evt_smoke_%';
 | `PROCESSING_FAILED` / Status 500 | meist ein Fremdschlüssel- oder RPC-Problem — `SMOKE_USER_ID` prüfen, Migrationen 0001–0005 eingespielt? |
 | `409 NO_CUSTOMER` beim Klick auf „Abo verwalten“ | In `subscriptions` fehlt die `stripe_customer_id` — das Konto hat noch kein Abo; zuerst eines starten (Portal öffnet sich erst mit Kunde) |
 | Portal meldet „Cancels Dec 17“, die Datenbank bleibt aber `cancel_at_period_end = false` | Flexible Abrechnung: Stripe setzt nur `cancel_at`, das Flag bleibt `false` — der Webhook muss beides auswerten, siehe „Abo-Portal“ |
+| `SUBSCRIPTION_WITHOUT_USER_ID` / `SUBSCRIPTION_STATUS_UNKNOWN` im `stripe_events.error` | `invoice.payment_failed` kam vor der Abo-Zeile, und das Abo in Stripe trägt keine brauchbare `metadata.user_id` — Checkout-Metadaten prüfen |
+| Dieselbe Event-ID nach einem `500` liefert wieder `500` statt `duplicate` | so gewollt: eine Zeile ohne `processed_at` wird erneut verarbeitet, nur abgeschlossene Events gelten als Duplikat |
+
+## Falle: `invoice.payment_failed` vor der Abo-Zeile
+
+Die Zustellung von Stripe ist nicht geordnet. Kommt `invoice.payment_failed`
+bevor `customer.subscription.created` die Zeile in `subscriptions` angelegt hat,
+fand der Webhook früher nichts zum Aktualisieren und quittierte das Event mit
+`200` — der Verzug war damit endgültig verloren, ein Retry galt als Duplikat.
+
+Seit der Absicherung gilt:
+
+- Fehlt die Zeile, holt der Webhook das Abo per
+  `stripe.subscriptions.retrieve()` und schreibt den Zustand aus Stripe
+  (`metadata.user_id`, Kunde, Add-on, Periodenende, Kündigung) mit Status
+  `past_due`. Ein späteres `customer.subscription.*` setzt den richtigen Status.
+- Fehlt dabei die `metadata.user_id`, antwortet die Route `500` und schreibt den
+  Grund in `stripe_events.error`; der nächste Zustellversuch verarbeitet das
+  Event erneut.
+- Die Idempotenzsperre gilt nur für **abgeschlossene** Events: eine Zeile ohne
+  `processed_at` wird bei erneutem Zustellen noch einmal verarbeitet.
+
+Nachweis bei Bedarf: Event mit `stripe events resend evt_…` erneut zustellen und
+in `stripe_events` prüfen, dass `processed_at` gesetzt wird und `subscriptions`
+die Zeile mit `status = past_due` enthält.
 
 ## Echter Rundlauf (optional)
 
