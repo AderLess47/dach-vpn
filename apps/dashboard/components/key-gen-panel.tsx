@@ -27,6 +27,21 @@ const PLATFORM_LABELS: Record<Platform, string> = {
   firetv: "Fire TV",
 };
 
+/**
+ * Formt die vom Server vergebene Adresse in die Host-Adresse für den Tunnel um.
+ * Der Pool weist seit Migration 0006 /32-Adressen zu; ein mitgeliefertes
+ * Präfix wird dennoch entfernt, damit nie eine Netzmaske in der Config landet.
+ */
+function wireguardClientAddress(assignedIp: string | null | undefined): string | null {
+  if (!assignedIp) return null;
+  const host = assignedIp.split("/")[0]?.trim() ?? "";
+  const octets = host.split(".");
+  const validIpv4 =
+    octets.length === 4 &&
+    octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255);
+  return validIpv4 ? `${host}/32` : null;
+}
+
 export function KeyGenPanel({
   accessToken,
   onRegistered,
@@ -105,6 +120,16 @@ export function KeyGenPanel({
       return;
     }
 
+    // Die Adresse kommt ausschließlich aus der Registrierungsantwort des Servers:
+    // ohne vergebene Adresse gibt es keine gültige Tunnel-Konfiguration.
+    const address = wireguardClientAddress(result?.device?.assignedIp);
+    if (!address) {
+      setError(
+        "Für den Config-Download muss das Gerät registriert sein — die Client-Adresse vergibt der Pool erst bei der Registrierung.",
+      );
+      return;
+    }
+
     const serverPublicKey = process.env.NEXT_PUBLIC_WG_SERVER_PUBLIC_KEY ?? "";
     const endpoint = process.env.NEXT_PUBLIC_WG_ENDPOINT ?? "";
 
@@ -118,7 +143,7 @@ export function KeyGenPanel({
     try {
       const config = buildWireguardConfig({
         privateKeyBase64: pair.privateKeyBase64,
-        address: "10.8.0.2/32",
+        address,
         serverPublicKeyBase64: serverPublicKey,
         endpoint,
         piholeActive: piholeEnabled,
