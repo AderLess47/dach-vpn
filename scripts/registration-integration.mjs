@@ -8,6 +8,8 @@
  *   3. Ein Retry mit demselben Public Key erzeugt nichts Neues
  *   4. Widerruf gibt die Adresse frei und leert assigned_ip
  *   5. Unter Nebenläufigkeit gibt es keine Doppelvergabe
+ *   6. rebind_device_key prüft den Besitz selbst: per RPC aufgerufen lehnt sie
+ *      fremde und unbekannte Geräte ab und lässt die Zeile unverändert
  *
  * Voraussetzung: erreichbares Postgres (siehe README).
  * ACHTUNG: setzt das Schema zurück. Nie gegen Produktion laufen lassen.
@@ -164,6 +166,89 @@ async function main() {
   check(
     activeOnB.rows[0].n === 30 && assignedPool.rows[0].n === 30,
     `Aktive Geräte und belegte Adressen stimmen überein (${activeOnB.rows[0].n} / ${assignedPool.rows[0].n})`,
+  );
+
+  // --- 6. Rebind-RPC schützt fremde Geräte ---------------------------------
+  // Die Route prüft den Besitz schon, die Funktion muss es aber selbst tun:
+  // ein Fehler in der Route darf keinen fremden Datensatz umschreiben.
+  console.log("→ rebind_device_key lehnt fremde Geräte auch direkt per RPC ab");
+  const target = registered[0];
+  const stranger = await createTestUser(admin, "stranger@example.invalid");
+  const ownerKey = fakePublicKey(201);
+
+  const rebound = await admin.query("select * from public.rebind_device_key($1, $2, $3)", [
+    userId,
+    target.device_id,
+    ownerKey,
+  ]);
+  check(
+    rebound.rows[0]?.device_id === target.device_id && rebound.rows[0]?.assigned_ip === target.assigned_ip,
+    "Eigener Schlüsselwechsel liefert dieselbe Geräte-ID und Adresse",
+  );
+
+  let foreignError = null;
+  try {
+    await admin.query("select * from public.rebind_device_key($1, $2, $3)", [
+      stranger,
+      target.device_id,
+      fakePublicKey(202),
+    ]);
+  } catch (error) {
+    foreignError = error;
+  }
+  check(
+    foreignError?.code === "P0005" && /DEVICE_NOT_FOUND/.test(foreignError.message ?? ""),
+    `Fremdes Gerät wird per RPC abgelehnt (${foreignError?.code ?? "kein Fehler"})`,
+  );
+
+  const untouched = await admin.query(
+    "select public_key, assigned_ip, status from public.devices where id = $1",
+    [target.device_id],
+  );
+  check(
+    untouched.rows[0].public_key === ownerKey &&
+      untouched.rows[0].assigned_ip === target.assigned_ip &&
+      untouched.rows[0].status === "active",
+    "Gerät bleibt unverändert (Key des Eigentümers, Adresse, Status)",
+  );
+
+  // Unbekannte IDs liefern dieselbe Antwort wie fremde — keine Sonde auf Geräte.
+  let unknownError = null;
+  try {
+    await admin.query("select * from public.rebind_device_key($1, $2, $3)", [
+      userId,
+      "00000000-0000-0000-0000-000000000000",
+      fakePublicKey(203),
+    ]);
+  } catch (error) {
+    unknownError = error;
+  }
+  check(
+    unknownError?.code === "P0005" && /DEVICE_NOT_FOUND/.test(unknownError.message ?? ""),
+    `Unbekannte Geräte-ID wird identisch abgelehnt (${unknownError?.code ?? "kein Fehler"})`,
+  );
+
+  // Endnutzer kommen gar nicht erst an die Funktion (nur service_role).
+  let roleError = null;
+  await admin.query("begin");
+  try {
+    await admin.query("set local role authenticated");
+    await admin.query("select set_config('request.jwt.claims', $1, true)", [
+      JSON.stringify({ sub: stranger, role: "authenticated" }),
+    ]);
+    await admin.query("select * from public.rebind_device_key($1, $2, $3)", [
+      stranger,
+      target.device_id,
+      fakePublicKey(204),
+    ]);
+  } catch (error) {
+    roleError = error;
+  } finally {
+    await admin.query("rollback");
+  }
+  check(
+    roleError?.code === "42501",
+    `rebind_device_key ist für Endnutzer gesperrt (${roleError?.code ?? "kein Fehler"})`,
   );
 
   await pool.end();
