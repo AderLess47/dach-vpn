@@ -190,6 +190,8 @@ Projekt-Secrets — niemals in den Chat, in Commits oder in Tickets.
 
 ## Lizenz
 
-Proprietär, alle Rechte vorbehalten: Der Quellcode ist einsehbar, ohne
-schriftliche Zustimmung aber nicht nutzbar — Details in [`LICENSE`](LICENSE).
+AGPL-3.0-only (GNU Affero General Public License v3): Der Quellcode lässt sich
+frei nutzen, verändern und weitergeben. Wer eine veränderte Fassung als
+Netzwerkdienst bereitstellt, muss den Quellcode dieser Fassung offenlegen —
+Details in [`LICENSE`](LICENSE).
 Fremdkomponenten stehen unter ihren eigenen Lizenzen.
