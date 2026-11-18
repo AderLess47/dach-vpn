@@ -1,9 +1,23 @@
 name: Doku-Links
 
+# Läuft nur, wenn sich etwas ändert, was die Prüfung liest: die Doku, die
+# README, die Migrationen, das Skript selbst und dieser Workflow.
 on:
   push:
     branches: ["main", "freebuff/**"]
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "supabase/migrations/**"
+      - "scripts/check-docs-links.mjs"
+      - ".github/workflows/docs-links.yml"
   pull_request:
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "supabase/migrations/**"
+      - "scripts/check-docs-links.mjs"
+      - ".github/workflows/docs-links.yml"
 
 concurrency:
   group: docs-links-${{ github.ref }}
