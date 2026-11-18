@@ -2,7 +2,8 @@
 /**
  * Prüft die relativen Links der Doku gegen das Repository.
  *
- * Die Links in `docs/` zeigen auf Migrationsdateien, Skripte und andere Doku.
+ * Geprüft werden `docs/` und die `README.md` im Wurzelverzeichnis. Die Links
+ * dort zeigen auf Migrationsdateien, Skripte und andere Doku.
  * Wird ein Ziel umbenannt oder verschoben, soll die CI rot werden — und nicht
  * erst der Leser ins Leere klicken.
  *
@@ -10,13 +11,14 @@
  * und reine Sprungmarken (`#…`) bleiben außen vor. Relative Ziele werden ab
  * der Datei aufgelöst, absolute (`/docs/x`) ab der Repo-Wurzel.
  *
- * Aufruf: `node scripts/check-docs-links.mjs [pfad …]` (Default: `docs`).
+ * Aufruf: `node scripts/check-docs-links.mjs [pfad …]`
+ * (Default: `docs` und `README.md`).
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 const ARGUMENTE = process.argv.slice(2);
-const WURZELN = ARGUMENTE.length > 0 ? ARGUMENTE : ["docs"];
+const WURZELN = ARGUMENTE.length > 0 ? ARGUMENTE : ["docs", "README.md"];
 const MARKDOWN = /\.mdx?$/i;
 // [Text](ziel) und [Text](ziel "Titel"); Bilder (![alt](src)) fallen mit darunter.
 const LINK = /\[[^\]]*\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
