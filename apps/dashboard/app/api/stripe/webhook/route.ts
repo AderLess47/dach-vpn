@@ -46,9 +46,24 @@ export async function POST(request: Request) {
 
   if (insertError) {
     if (insertError.code === "23505") {
-      return NextResponse.json({ received: true, duplicate: true }, { status: 200 });
+      // Bekannte Event-ID: endgültig Duplikat ist sie nur, wenn der erste
+      // Versuch durchgelaufen ist. Ein gescheiterter Versuch hinterlässt eine
+      // Zeile ohne `processed_at` — die darf erneut verarbeitet werden.
+      const { data: existing, error: lookupError } = await admin
+        .from("stripe_events")
+        .select("processed_at")
+        .eq("event_id", event.id)
+        .maybeSingle();
+
+      if (lookupError) {
+        return NextResponse.json({ code: "EVENT_LOG_FAILED" }, { status: 502 });
+      }
+      if (existing?.processed_at) {
+        return NextResponse.json({ received: true, duplicate: true }, { status: 200 });
+      }
+    } else {
+      return NextResponse.json({ code: "EVENT_LOG_FAILED" }, { status: 502 });
     }
-    return NextResponse.json({ code: "EVENT_LOG_FAILED" }, { status: 502 });
   }
 
   try {
@@ -74,7 +89,7 @@ export async function POST(request: Request) {
         break;
       }
       case "invoice.payment_failed": {
-        await markPastDue(event.data.object as Stripe.Invoice);
+        await markPastDue(event.data.object as Stripe.Invoice, prices.pihole);
         break;
       }
       default:
@@ -93,14 +108,27 @@ export async function POST(request: Request) {
       .from("stripe_events")
       .update({ error: error instanceof Error ? error.message.slice(0, 200) : "unbekannt" })
       .eq("event_id", event.id);
-    // 500, damit Stripe erneut zustellt; die Idempotenzsperre bleibt bestehen.
+    // 500, damit Stripe erneut zustellt. Die Sperrzeile bleibt ohne
+    // `processed_at`, der nächste Versuch verarbeitet das Event erneut.
     return NextResponse.json({ code: "PROCESSING_FAILED" }, { status: 500 });
   }
 
-  async function applySubscription(subscription: Stripe.Subscription, piholePrice: string | null) {
+  async function applySubscription(
+    subscription: Stripe.Subscription,
+    piholePrice: string | null,
+    options: { status?: ReturnType<typeof mapSubscriptionStatus>; requireUser?: boolean } = {},
+  ) {
     const userId = subscription.metadata?.user_id ?? null;
-    const status = mapSubscriptionStatus(subscription.status);
-    if (!userId || !status) return;
+    const status = options.status ?? mapSubscriptionStatus(subscription.status);
+    if (!userId || !status) {
+      // Beim Nachziehen aus Stripe ist ein fehlendes `user_id` ein echter
+      // Fehler: lieber 500 und ein späterer Zustellversuch als ein stiller
+      // Verlust des Verzugs.
+      if (options.requireUser) {
+        throw new Error(!userId ? "SUBSCRIPTION_WITHOUT_USER_ID" : "SUBSCRIPTION_STATUS_UNKNOWN");
+      }
+      return;
+    }
 
     const piholeActive = piholePrice
       ? subscription.items.data.some((item) => item.price?.id === piholePrice)
@@ -129,7 +157,7 @@ export async function POST(request: Request) {
     if (error) throw new Error(error.message);
   }
 
-  async function markPastDue(invoice: Stripe.Invoice) {
+  async function markPastDue(invoice: Stripe.Invoice, piholePrice: string | null) {
     const subscriptionId = subscriptionIdFromInvoice(invoice);
     if (!subscriptionId) return;
 
@@ -139,19 +167,30 @@ export async function POST(request: Request) {
       .eq("stripe_subscription_id", subscriptionId)
       .maybeSingle();
 
-    if (!data) return;
+    if (data) {
+      const { error } = await admin!.rpc("apply_subscription_state", {
+        p_user_id: data.user_id,
+        p_customer_id: data.stripe_customer_id,
+        p_subscription_id: subscriptionId,
+        p_status: "past_due",
+        p_pihole: data.pihole_addon_active,
+        p_period_end: data.current_period_end,
+        p_cancel_at_period_end: data.cancel_at_period_end,
+      });
 
-    const { error } = await admin!.rpc("apply_subscription_state", {
-      p_user_id: data.user_id,
-      p_customer_id: data.stripe_customer_id,
-      p_subscription_id: subscriptionId,
-      p_status: "past_due",
-      p_pihole: data.pihole_addon_active,
-      p_period_end: data.current_period_end,
-      p_cancel_at_period_end: data.cancel_at_period_end,
+      if (error) throw new Error(error.message);
+      return;
+    }
+
+    // Noch keine Zeile: Das Event kann vor `customer.subscription.created`
+    // eintreffen. Den Zustand deshalb aus Stripe nachziehen, statt den Verzug
+    // wirkungslos zu quittieren. Den Status setzt das fehlgeschlagene
+    // Inkasso; ein späteres `customer.subscription.*` korrigiert ihn wieder.
+    const subscription = await stripe!.subscriptions.retrieve(subscriptionId);
+    await applySubscription(subscription, piholePrice, {
+      status: "past_due",
+      requireUser: true,
     });
-
-    if (error) throw new Error(error.message);
   }
 }
 
