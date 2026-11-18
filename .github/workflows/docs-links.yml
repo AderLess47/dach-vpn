@@ -1,0 +1,20 @@
+name: Doku-Links
+
+on:
+  push:
+    branches: ["main", "freebuff/**"]
+  pull_request:
+
+concurrency:
+  group: docs-links-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  links:
+    name: Relative Links in docs/
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Kein bun install: das Skript nutzt nur Node-Bordmittel.
+      - name: Prüfen
+        run: node scripts/check-docs-links.mjs

@@ -15,6 +15,7 @@
     "typecheck:crypto": "cd packages/crypto && bunx tsc -p tsconfig.json --noEmit",
     "typecheck:dashboard": "cd apps/dashboard && bunx tsc -p tsconfig.json --noEmit",
     "check:env": "node scripts/check-env.mjs",
+    "check:docs": "node scripts/check-docs-links.mjs",
     "setup:env": "node scripts/setup-env.mjs",
     "setup:db": "node scripts/setup-db-url.mjs",
     "db:apply": "node scripts/db-apply.mjs",
