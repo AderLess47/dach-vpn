@@ -28,14 +28,22 @@ kommt, kann Folgefehler sein, weil der kaputte Zustand weitergeschrieben wurde.
 
 ## Invarianten je Funktion
 
-**`seed_ip_pool(node, cidr)`**
+Jede Überschrift verlinkt die Migrationen mit der Definition der Funktion und
+die Skripte, die die Zusicherungen prüfen.
+
+**`seed_ip_pool(node, cidr)`** — Migration
+[0002](../supabase/migrations/20261117090002_ipam.sql),
+[0006](../supabase/migrations/20261117090006_ipam_host_addresses.sql) · Test
+[ipam-loadtest.mjs](../scripts/ipam-loadtest.mjs)
 
 - idempotent: ein zweiter Lauf fügt nichts hinzu (Assertion: Rückgabe `0`).
 - eine `cidr` ohne nutzbare Hosts wird mit `POOL_TOO_SMALL` abgelehnt.
 - das befüllte Netz enthält genau die Hosts, die der Test erwartet (30 aus
   `/27`).
 
-**`allocate_ip(node, device)`**
+**`allocate_ip(node, device)`** — Migration
+[0002](../supabase/migrations/20261117090002_ipam.sql) · Test
+[ipam-loadtest.mjs](../scripts/ipam-loadtest.mjs)
 
 - seriell über `pg_advisory_xact_lock` je Knoten: unter paralleler Last gibt es
   keine doppelte Adresse (120 parallele Anfragen auf 30 Adressen → 30 Erfolge,
@@ -45,18 +53,26 @@ kommt, kann Folgefehler sein, weil der kaputte Zustand weitergeschrieben wurde.
 - Pool und Geräte stimmen zusammen (jede belegte Adresse gehört zu einem
   aktiven Gerät).
 
-**`release_ip(device)`**
+**`release_ip(device)`** — Migration
+[0002](../supabase/migrations/20261117090002_ipam.sql) · Test
+[ipam-loadtest.mjs](../scripts/ipam-loadtest.mjs)
 
 - gibt genau eine Adresse frei (Rückgabe `1`).
 - danach hält das Gerät keine Adresse mehr (`device_id` leer).
 
-**`revoke_device(device)`**
+**`revoke_device(device)`** — Migration
+[0002](../supabase/migrations/20261117090002_ipam.sql) · Tests
+[ipam-loadtest.mjs](../scripts/ipam-loadtest.mjs),
+[registration-integration.mjs](../scripts/registration-integration.mjs)
 
 - setzt `status = 'revoked'`, `revoked_at` und leert `assigned_ip`.
 - gibt die Adresse frei; der Pool-Eintrag ist `free` und ohne Gerät.
 - eine neue Registrierung erhält die freigewordene Adresse wieder.
 
-**`register_device(user, name, platform, key, node, pihole)`**
+**`register_device(user, name, platform, key, node, pihole)`** — Migration
+[0003](../supabase/migrations/20261117090003_register_device.sql),
+[0004](../supabase/migrations/20261117090004_auth_binding.sql) · Test
+[registration-integration.mjs](../scripts/registration-integration.mjs)
 
 - Gerät und Adresse entstehen atomar: erschöpfter Pool → `IP_POOL_EXHAUSTED`
   (`P0001`) **und** die Geräteanzahl bleibt unverändert (Rollback).
@@ -65,7 +81,10 @@ kommt, kann Folgefehler sein, weil der kaputte Zustand weitergeschrieben wurde.
 - Gerätelimit greift (`DEVICE_LIMIT_REACHED`, `P0003`).
 - ein Public Key, der einem anderen Konto gehört, wird abgelehnt (`P0004`).
 
-**`rebind_device_key(user, device, key)`**
+**`rebind_device_key(user, device, key)`** — Migration
+[0007](../supabase/migrations/20261118090007_rebind_device_key.sql) · Tests
+[registration-integration.mjs](../scripts/registration-integration.mjs),
+[auth-route-e2e.mjs](../scripts/auth-route-e2e.mjs)
 
 - der Eigentümer bekommt dieselbe Geräte-ID und dieselbe Adresse zurück; nur
   `public_key` ändert sich.
@@ -80,7 +99,9 @@ kommt, kann Folgefehler sein, weil der kaputte Zustand weitergeschrieben wurde.
   `auth-route-e2e.mjs`.
 - für `authenticated` nicht ausführbar (`42501`).
 
-**`apply_subscription_state(…)` / `admin_metrics()` / `stripe_events`**
+**`apply_subscription_state(…)` / `admin_metrics()` / `stripe_events`** —
+Migration [0005](../supabase/migrations/20261117090005_stripe.sql) · Test
+[subscription-sync-test.mjs](../scripts/subscription-sync-test.mjs)
 
 - Upsert je `user_id`; Status und Add-on folgen dem Event.
 - fehlende Werte überschreiben nichts: `stripe_customer_id` und
@@ -89,7 +110,9 @@ kommt, kann Folgefehler sein, weil der kaputte Zustand weitergeschrieben wurde.
   keine Adressen) und ein Knoten-Aggregat auch dann, wenn es leer ist.
 - alle drei sind für `authenticated` gesperrt (`42501`).
 
-**`handle_new_user()`**
+**`handle_new_user()`** — Migration
+[0004](../supabase/migrations/20261117090004_auth_binding.sql) · Test
+[rls-test.mjs](../scripts/rls-test.mjs)
 
 - jeder `auth.users`-Eintrag bekommt ein Profil (Trigger).
 
@@ -142,8 +165,9 @@ Damit die Tabelle oben nicht mehr verspricht, als sie hält:
 
 - `POOL_TOO_SMALL` (zu kleines Netz) wird von keiner Prüfung angesprochen.
 - `register_device` mit bereits widerrufenem Public Key (`DEVICE_REVOKED` aus
-  Migration 0003) ist nur über `rebind_device_key` abgedeckt, nicht für die
-  Registrierung selbst.
+  [Migration 0003](../supabase/migrations/20261117090003_register_device.sql))
+  ist nur über `rebind_device_key` abgedeckt, nicht für die Registrierung
+  selbst.
 - die Edge Function `register-device` hat keine Tests (keine Deno-Runtime in der
   CI); geprüft wird die Next.js-Route.
 - Stripe-Webhook und Checkout nur über `bun run test:stripe` im Testmodus, siehe
