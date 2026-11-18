@@ -7,6 +7,9 @@ das dazu, was nur über die Route sichtbar ist. Diese Datei hält fest, welche
 Zusicherung wo steht und wie man prüft, dass eine Prüfung überhaupt fehlschlagen
 kann.
 
+Das Grundschema — Enums, Tabellen, Indizes, RLS-Policies und Grants — steht in
+[Migration 0001](../supabase/migrations/20261117090001_init.sql).
+
 ## Wo was läuft
 
 | Skript | Gegenstand | CI-Job, Schritt |
