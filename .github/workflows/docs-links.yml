@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   links:
-    name: Relative Links in docs/
+    name: Relative Links in docs/ und README.md
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
