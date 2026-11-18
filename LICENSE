@@ -1,0 +1,37 @@
+DACH VPN — Proprietäre Lizenz (Alle Rechte vorbehalten)
+=======================================================
+
+Copyright (c) 2026 AderLess47. Alle Rechte vorbehalten.
+
+Dieses Repository ist „source-available“: Der Quellcode ist öffentlich
+einsehbar, aber es wird keine Lizenz zur Nutzung erteilt.
+
+1. Keine Nutzung
+   Ohne vorherige schriftliche Zustimmung des Rechteinhabers ist es nicht
+   gestattet, dieses Repository oder Teile davon zu kopieren, zu verändern,
+   zu verbreiten, zu veröffentlichen, bereitzustellen, zu lizenzieren oder
+   wirtschaftlich zu nutzen — weder vollständig noch in Auszügen, weder als
+   Quellcode noch als Dienst.
+
+2. Zulässig bleibt
+   das Ansehen des Quellcodes im Repository, das Anlegen von Forks über die
+   GitHub-Oberfläche im Rahmen der GitHub-Nutzungsbedingungen sowie Zitate mit
+   Quellenangabe für Bewertung, Kritik und Berichterstattung.
+
+3. Fremdkomponenten
+   Abhängigkeiten und mitgelieferte Fremdkomponenten stehen unter ihren
+   eigenen Lizenzen (siehe `bun.lock` und die jeweiligen Pakete). Diese Lizenz
+   ändert daran nichts.
+
+4. Rechteübergang
+   Soweit ein gesonderter Vertrag (etwa das Angebot für dieses Projekt) die
+   Übertragung von Nutzungsrechten an den Auftraggeber vorsieht, geht dieser
+   Vertrag vor; die Rechte gehen dann mit vollständiger Zahlung über.
+
+5. Gewährleistung
+   Die Software wird „wie besehen“ bereitgestellt, ohne Gewährleistung
+   irgendeiner Art. Eine Haftung ist, soweit gesetzlich zulässig,
+   ausgeschlossen.
+
+Anfragen zu Nutzungsrechten: über die im GitHub-Profil hinterlegte
+Kontaktmöglichkeit.
