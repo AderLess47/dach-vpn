@@ -6,7 +6,7 @@ Auth mit Gerätebindung und den Zero-Knowledge-Proof-of-Concept für die
 Schlüsselerzeugung.
 
 Die kaufmännischen Unterlagen (Angebot, Aufwandskalkulation, Variantenvergleich)
-liegen unverändert in [`angebot/`](angebot/).
+liegen bewusst nicht im Repository.
 
 ## Struktur
 
@@ -187,3 +187,9 @@ Projekt-Secrets — niemals in den Chat, in Commits oder in Tickets.
   gegen den echten lokalen Supabase-Stack; ein Lauf auf GitHub steht aus.
 - **Offen (M1):** E-Mail-Templates für Auth-Mails, Stripe-Live-Konfiguration
   (Preise/Webhook-Endpunkt), Feinschliff der Admin-Sicht.
+
+## Lizenz
+
+Proprietär, alle Rechte vorbehalten: Der Quellcode ist einsehbar, ohne
+schriftliche Zustimmung aber nicht nutzbar — Details in [`LICENSE`](LICENSE).
+Fremdkomponenten stehen unter ihren eigenen Lizenzen.
