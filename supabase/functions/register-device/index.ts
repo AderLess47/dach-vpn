@@ -11,7 +11,12 @@
  * - Die RPC `register_device` ist auch hier nur mit Service-Role aufrufbar.
  */
 
-import { guardRegisterDevice, parseBearerToken } from "../../../packages/shared/src/index.ts";
+import {
+  describeDeviceFailure,
+  guardRegisterDevice,
+  parseBearerToken,
+  parseMaxDevices,
+} from "../../../packages/shared/src/index.ts";
 
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-origin": "*",
@@ -54,6 +59,8 @@ Deno.serve(async (request: Request): Promise<Response> => {
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const nodeId = Deno.env.get("DEFAULT_NODE_ID") ?? Deno.env.get("NODE_ID");
+  // Gleiche Variable und gleiche Auswertung wie in der Next.js-Route.
+  const maxDevices = parseMaxDevices(Deno.env.get("MAX_DEVICES_PER_USER"));
 
   if (!supabaseUrl || !anonKey || !serviceRoleKey || !nodeId) {
     return json(500, {
@@ -99,34 +106,16 @@ Deno.serve(async (request: Request): Promise<Response> => {
       p_public_key: publicKey,
       p_node_id: nodeId,
       p_pihole_enabled: piholeEnabled ?? false,
-      p_max_devices: 5,
+      p_max_devices: maxDevices,
     }),
   });
 
   if (!response.ok) {
+    // PostgREST liefert den RPC-Fehler als Text; die Marker stehen im Body.
+    // Dieselbe Abbildung wie in den beiden Next.js-Routen.
     const body = await response.text();
-    if (body.includes("IP_POOL_EXHAUSTED")) {
-      return json(503, {
-        code: "POOL_EXHAUSTED",
-        message: "Für diesen Knoten ist aktuell keine freie Adresse verfügbar.",
-      });
-    }
-    if (body.includes("DEVICE_LIMIT_REACHED")) {
-      return json(409, {
-        code: "DEVICE_LIMIT_REACHED",
-        message: "Die maximale Geräteanzahl dieses Kontos ist erreicht.",
-      });
-    }
-    if (body.includes("DEVICE_REVOKED") || body.includes("DEVICE_KEY_CONFLICT")) {
-      return json(409, {
-        code: "DEVICE_EXISTS",
-        message: "Dieses Gerät kann nicht erneut registriert werden.",
-      });
-    }
-    return json(502, {
-      code: "PERSIST_FAILED",
-      message: "Gerät konnte nicht gespeichert werden.",
-    });
+    const failure = describeDeviceFailure({ message: body }, "register");
+    return json(failure.status, { code: failure.code, message: failure.message });
   }
 
   const rows = (await response.json()) as Array<{

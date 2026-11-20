@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { guardRegisterDevice, parseBearerToken } from "@dachvpn/shared";
+import {
+  describeDeviceFailure,
+  guardRegisterDevice,
+  parseBearerToken,
+  parseMaxDevices,
+} from "@dachvpn/shared";
 import { publicKeyFingerprint } from "@dachvpn/crypto";
 import { authUnavailableResponse, isAuthUnavailable } from "../../../../lib/api-auth";
 
@@ -57,7 +62,7 @@ export async function POST(request: Request) {
   const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const nodeId = process.env.DEFAULT_NODE_ID ?? process.env.NODE_ID;
-  const maxDevices = Number.parseInt(process.env.MAX_DEVICES_PER_USER ?? "5", 10);
+  const maxDevices = parseMaxDevices(process.env.MAX_DEVICES_PER_USER);
 
   if (!supabaseUrl || !anonKey || !serviceRoleKey || !nodeId) {
     return NextResponse.json(
@@ -116,61 +121,20 @@ export async function POST(request: Request) {
     p_public_key: publicKey,
     p_node_id: nodeId,
     p_pihole_enabled: piholeEnabled ?? false,
-    p_max_devices: Number.isFinite(maxDevices) ? maxDevices : 5,
+    p_max_devices: maxDevices,
   });
 
   if (error) {
-    const message = error.message ?? "";
+    // Eine Quelle für die Abbildung — dieselbe wie in der Edge Function und in
+    // der Rebind-Route (`packages/shared/src/device-errors.ts`).
+    const failure = describeDeviceFailure(
+      { message: error.message, code: error.code },
+      "register",
+    );
 
-    if (message.includes("IP_POOL_EXHAUSTED")) {
-      return NextResponse.json(
-        {
-          code: "POOL_EXHAUSTED",
-          message:
-            "Für diesen Knoten ist aktuell keine freie Adresse verfügbar. Bitte später erneut versuchen.",
-        },
-        { status: 503 },
-      );
-    }
-
-    if (message.includes("DEVICE_REVOKED")) {
-      return NextResponse.json(
-        {
-          code: "DEVICE_REVOKED",
-          message: "Dieses Gerät wurde widerrufen. Bitte ein neues Schlüsselpaar erzeugen.",
-        },
-        { status: 409 },
-      );
-    }
-
-    if (message.includes("DEVICE_LIMIT_REACHED")) {
-      return NextResponse.json(
-        {
-          code: "DEVICE_LIMIT_REACHED",
-          message: "Die maximale Geräteanzahl dieses Kontos ist erreicht.",
-        },
-        { status: 409 },
-      );
-    }
-
-    if (message.includes("DEVICE_KEY_CONFLICT") || error.code === "23505") {
-      return NextResponse.json(
-        { code: "DEVICE_EXISTS", message: "Dieser Schlüssel ist bereits registriert." },
-        { status: 409 },
-      );
-    }
-
-    if (error.code === "23503") {
-      return NextResponse.json(
-        { code: "PROFILE_MISSING", message: "Für dieses Konto existiert noch kein Profil." },
-        { status: 409 },
-      );
-    }
-
-    // Keine DB-Fehlertexte nach außen geben (können Constraints verraten).
     return NextResponse.json(
-      { code: "PERSIST_FAILED", message: "Gerät konnte nicht gespeichert werden." },
-      { status: 502 },
+      { code: failure.code, message: failure.message },
+      { status: failure.status },
     );
   }
 

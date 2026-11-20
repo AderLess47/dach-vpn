@@ -116,6 +116,35 @@ function newPublicKey() {
   return randomBytes(32).toString("base64");
 }
 
+/**
+ * Seit Migration 0009 verlangt die Registrierung ein laufendes Abo. Im Stack
+ * gibt es keine Fixtures, deshalb über die Service-Role-RPC anlegen.
+ */
+async function grantSubscription(userId, { pihole = false } = {}) {
+  const { status, body } = await request(
+    `${SUPABASE_URL}/rest/v1/rpc/apply_subscription_state`,
+    {
+      method: "POST",
+      headers: serviceHeaders(),
+      body: JSON.stringify({
+        p_user_id: userId,
+        p_customer_id: `cus_e2e_${userId.slice(0, 8)}`,
+        p_subscription_id: `sub_e2e_${userId.slice(0, 8)}`,
+        p_status: "active",
+        p_pihole: pihole,
+        p_period_end: null,
+        p_cancel_at_period_end: false,
+      }),
+    },
+  );
+
+  if (status >= 300) {
+    throw new Error(
+      `Abo für ${userId} nicht angelegt (${status}): ${JSON.stringify(body)}`,
+    );
+  }
+}
+
 async function register(accessToken, payload) {
   return request(`${BASE_URL}/api/devices/register`, {
     method: "POST",
@@ -175,6 +204,9 @@ async function main() {
   const userA = await createUser(emailA);
   const userB = await createUser(emailB);
   const userC = await createUser(emailC);
+  await grantSubscription(userA);
+  await grantSubscription(userB);
+  await grantSubscription(userC);
   const tokenA = await signIn(emailA);
   const tokenB = await signIn(emailB);
   const tokenC = await signIn(emailC);
@@ -207,6 +239,32 @@ async function main() {
   check(
     withPrivateKey.status === 422 && withPrivateKey.body?.code === "PRIVATE_KEY_MATERIAL",
     `Privater Schlüssel → 422 (${withPrivateKey.status} ${withPrivateKey.body?.code})`,
+  );
+
+  console.log("→ Zugangs-Gate: Abo und Add-on");
+  const emailE = `auth-e2e-${run}-e@example.invalid`;
+  await createUser(emailE);
+  const tokenE = await signIn(emailE);
+  const withoutSubscription = await register(tokenE, {
+    name: "E2E E",
+    platform: "web",
+    publicKey: newPublicKey(),
+  });
+  check(
+    withoutSubscription.status === 403 &&
+      withoutSubscription.body?.code === "SUBSCRIPTION_REQUIRED",
+    `Ohne Abo → 403 SUBSCRIPTION_REQUIRED (${withoutSubscription.status} ${withoutSubscription.body?.code})`,
+  );
+
+  const withoutAddon = await register(tokenB, {
+    name: "E2E B Addon",
+    platform: "web",
+    publicKey: newPublicKey(),
+    piholeEnabled: true,
+  });
+  check(
+    withoutAddon.status === 403 && withoutAddon.body?.code === "ADDON_NOT_BOOKED",
+    `Pi-hole ohne Buchung → 403 ADDON_NOT_BOOKED (${withoutAddon.status} ${withoutAddon.body?.code})`,
   );
 
   console.log("→ Registrierung gegen den angemeldeten Nutzer");
@@ -313,12 +371,14 @@ async function main() {
 
   console.log("→ Widerrufenes Gerät nimmt keinen neuen Schlüssel an");
   const emailD = `auth-e2e-${run}-d@example.invalid`;
-  await createUser(emailD);
+  const userD = await createUser(emailD);
+  await grantSubscription(userD, { pihole: true });
   const tokenD = await signIn(emailD);
   const createdD = await register(tokenD, {
     name: "E2E D",
     platform: "web",
     publicKey: newPublicKey(),
+    piholeEnabled: true,
   });
   const deviceD = createdD.body?.device;
   const revokedD = await revoke(tokenD, deviceD?.id);

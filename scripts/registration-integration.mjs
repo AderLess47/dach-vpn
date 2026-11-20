@@ -34,6 +34,17 @@ async function register(
   return rows[0];
 }
 
+/**
+ * Seit Migration 0009 verlangt register_device ein laufendes Abo. Der Test
+ * registriert Geräte, also braucht jeder beteiligte Nutzer eines.
+ */
+async function grantSubscription(client, userId, { pihole = false } = {}) {
+  await client.query(
+    "select * from public.apply_subscription_state($1, $2, $3, 'active', $4, null, false)",
+    [userId, `cus_${userId.slice(0, 8)}`, `sub_${userId.slice(0, 8)}`, pihole],
+  );
+}
+
 async function countDevices(client) {
   const { rows } = await client.query("select count(*)::int as n from public.devices");
   return rows[0].n;
@@ -42,6 +53,7 @@ async function countDevices(client) {
 async function main() {
   const admin = await migrate();
   const userId = await createTestUser(admin);
+  await grantSubscription(admin, userId);
 
   // --- 1. Atomare Anlage ---------------------------------------------------
   console.log("→ Registrierung vergibt Adresse und Gerät gemeinsam");
@@ -120,6 +132,7 @@ async function main() {
   await admin.query("select public.seed_ip_pool($1, '10.8.2.0/27'::cidr)", [NODE_B]); // 30 Hosts
 
   const concurrentUser = await createTestUser(admin, "concurrent@example.invalid");
+  await grantSubscription(admin, concurrentUser);
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 16 });
 
   const results = await Promise.all(

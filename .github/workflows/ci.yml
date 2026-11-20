@@ -22,8 +22,19 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Typecheck
         run: bun run typecheck
-      - name: Unit-Tests
-        run: bun run test
+      - name: Dokument-Zahlen (README und docs/testing.md)
+        # Reiner Vergleich der Zahlen in beiden Dokumenten, ohne Testlauf.
+        run: bun run check:docs
+      - name: Unit-Tests (und README-Zahl)
+        # Führt `bun run test` aus und vergleicht die Zahl der bestandenen Tests
+        # mit der Angabe im README-Schnellstart.
+        run: node scripts/check-unit-count.mjs
+      - name: Stub-Kontrakt und HTTP-Tests der Routen (Supabase und Stripe gestubbt)
+        # Verkettet test:stub, test:routes, test:revoke, test:webhook, test:admin
+        # und test:billing; die Einzelskripte bleiben für gezielte Läufe.
+        run: bun run test:http
+      - name: Mail-Vorlagen entsprechen der Marke
+        run: bun run mail:check
       - name: Angebotszahlen gegen kalkulation.csv
         # angebot/ steht in .gitignore (kaufmaennische Daten bleiben lokal), in CI
         # fehlt die Kalkulationsbasis. Ohne CSV waere der Schritt immer rot.
@@ -33,6 +44,26 @@ jobs:
         run: |
           mkdir -p ci-logs
           bun run build 2>&1 | tee ci-logs/next-build.log
+      - name: Startseite im Trockenlauf prüfen (ohne Auth-Konfiguration)
+        # Der Build darüber hat keine NEXT_PUBLIC_*-Werte. Die Startseite muss
+        # deshalb den Trockenlauf-Hinweis zeigen; `check:render:dry` hält die
+        # Zahl der Prüfungen gegen die README.
+        run: |
+          set -euo pipefail
+          (cd apps/dashboard && PORT=3100 nohup bun run start > /tmp/dryrun-server.log 2>&1 &)
+
+          ready=0
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:3100/; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then
+            echo "Server ist nicht gestartet:"
+            cat /tmp/dryrun-server.log
+            exit 1
+          fi
+
+          BASE_URL=http://127.0.0.1:3100 bun run check:render:dry
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -66,7 +97,9 @@ jobs:
           bun-version: "1.4.x"
       - name: Install
         run: bun install --frozen-lockfile
-      - name: Datenbank-Tests
+      - name: Datenbank-Tests (und README-Zahlen)
+        # Führt die sieben Suiten über scripts/run-db-suites.mjs aus und
+        # vergleicht die Prüfungszahlen mit dem test:db-Absatz der README.
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: bun run test:db
@@ -95,7 +128,7 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
       - uses: ./.github/actions/supabase-local
-      - name: Auth-Route gegen den Stack prüfen
+      - name: Auth-Route gegen den Stack prüfen (und README-Zahl)
         env:
           DEFAULT_NODE_ID: ci-node-1
         run: |
@@ -117,7 +150,7 @@ jobs:
             exit 1
           fi
 
-          BASE_URL=http://127.0.0.1:3000 node scripts/auth-route-e2e.mjs 2>&1 \
+          BASE_URL=http://127.0.0.1:3000 bun run test:auth-route 2>&1 \
             | tee ci-logs/auth-route.log || {
             echo "Route-Log:"
             cat /tmp/dachvpn-server.log
@@ -174,30 +207,9 @@ jobs:
             exit 1
           fi
 
-          status=$(curl -s -o ci-logs/page.html -w "%{http_code}" http://127.0.0.1:3000/)
-          failures=0
-          expect_status() {
-            if [ "$status" = "200" ]; then echo "PASS Startseite antwortet mit 200";
-            else echo "FAIL Startseite antwortet mit $status"; failures=1; fi
-          }
-          expect_contains() {
-            if grep -q "$1" ci-logs/page.html; then echo "PASS $2";
-            else echo "FAIL $2"; failures=1; fi
-          }
-          expect_absent() {
-            if grep -q "$1" ci-logs/page.html; then echo "FAIL $2"; failures=1;
-            else echo "PASS $2"; fi
-          }
-
-          expect_status
-          expect_contains "Anmelden" "Auth-Formular wird server-gerendert"
-          expect_contains "E-Mail" "E-Mail-Feld ist vorhanden"
-          expect_contains "Passwort" "Passwort-Feld ist vorhanden"
-          expect_absent "Supabase Auth ist nicht konfiguriert" "kein Konfigurationshinweis (Auth ist aktiv)"
-          expect_absent "DEMO_USER_ID" "kein Demo-User-Hinweis im HTML"
-
-          [ "$failures" = "0" ] || exit 1
-          echo "Alle Prüfungen bestanden (Rendering mit Supabase Auth)."
+          # Prüft die sechs Render-Punkte und hält ihre Zahl gegen die README.
+          # Das HTML landet als Artefakt in ci-logs/page.html.
+          RENDER_PAGE_FILE=ci-logs/page.html bun run check:render
       - name: Logs einsammeln
         if: failure()
         run: |

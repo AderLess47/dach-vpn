@@ -19,6 +19,8 @@ const SETUP_FILES = [
   "supabase/migrations/20261117090005_stripe.sql",
   "supabase/migrations/20261117090006_ipam_host_addresses.sql",
   "supabase/migrations/20261118090007_rebind_device_key.sql",
+  "supabase/migrations/20261120090008_tenants.sql",
+  "supabase/migrations/20261120090009_entitlement_gate.sql",
 ];
 
 /**

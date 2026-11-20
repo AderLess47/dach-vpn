@@ -36,6 +36,7 @@
       "name": "@dachvpn/crypto",
       "version": "0.1.0",
       "dependencies": {
+        "@dachvpn/shared": "workspace:*",
         "@noble/curves": "^1.9.7",
         "@noble/hashes": "^1.8.0",
       },

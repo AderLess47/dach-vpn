@@ -13,11 +13,24 @@ import { createChecker, createTestUser, fakePublicKey, migrate } from "./lib/db-
 const NODE = "eu-rls-1";
 const { check, finish } = createChecker();
 
+/**
+ * Seit Migration 0009 verlangt register_device ein laufendes Abo. Der Test
+ * registriert Geräte für drei Konten, also braucht jedes eines.
+ */
+async function grantSubscription(db, userId, { pihole = false } = {}) {
+  await db.query(
+    "select * from public.apply_subscription_state($1, $2, $3, 'active', $4, null, false)",
+    [userId, `cus_${userId.slice(0, 8)}`, `sub_${userId.slice(0, 8)}`, pihole],
+  );
+}
+
 async function main() {
   const db = await migrate();
 
   const userA = await createTestUser(db, "alice@example.invalid");
   const userB = await createTestUser(db, "bob@example.invalid");
+  await grantSubscription(db, userA, { pihole: true });
+  await grantSubscription(db, userB);
 
   // --- Profil-Trigger ------------------------------------------------------
   const profiles = await db.query(
@@ -36,10 +49,8 @@ async function main() {
     "select public.register_device($1, 'Bob-TV', 'web', $2, $3, false, 10)",
     [userB, fakePublicKey(2), NODE],
   );
-  await db.query(
-    "insert into public.subscriptions (user_id, status, pihole_addon_active) values ($1, 'active', true)",
-    [userA],
-  );
+  // Das Abo von Alice entsteht oben bereits (Migration 0009 verlangt es vor der
+  // Registrierung); hier ist nichts nachzuziehen.
 
   /** Führt eine Funktion in einer Transaktion als `authenticated` mit JWT-Sub aus. */
   async function asUser(userId, fn) {
@@ -150,6 +161,7 @@ async function main() {
 
   // --- Gerätelimit ---------------------------------------------------------
   const userC = await createTestUser(db, "carol@example.invalid");
+  await grantSubscription(db, userC);
   const limited = [];
   for (let i = 1; i <= 2; i += 1) {
     await db.query("select public.register_device($1, $2, 'web', $3, $4, false, 2)", [

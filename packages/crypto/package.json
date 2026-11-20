@@ -9,6 +9,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@dachvpn/shared": "workspace:*",
     "@noble/curves": "^1.9.7",
     "@noble/hashes": "^1.8.0"
   }

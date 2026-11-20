@@ -8,6 +8,7 @@
 
 import { x25519 } from "@noble/curves/ed25519";
 import { sha256 } from "@noble/hashes/sha256";
+import { DEFAULT_BRAND } from "@dachvpn/shared";
 
 export const DNS_FILTERED_DEFAULT = "10.9.0.1";
 export const DNS_PLAIN_DEFAULT = "1.1.1.1";
@@ -86,6 +87,12 @@ export interface WireguardConfigInput {
   allowedIps?: string;
   mtu?: number;
   keepalive?: number;
+  /**
+   * Marken-Slug für den Dateinamen (White-Label). Default: HubGuard.
+   * Der Slug kommt aus `resolveBrand()` in `@dachvpn/shared` — hier wird nur
+   * geprüft, dass er keinen Pfadanteil in den Download schmuggeln kann.
+   */
+  brandSlug?: string;
 }
 
 export interface WireguardConfig {
@@ -115,6 +122,13 @@ export function buildWireguardConfig(
     throw new Error(`Ungültiger Endpoint: ${input.endpoint}`);
   }
 
+  // Nur der Slug der Marke landet im Dateinamen; alles andere würde einen
+  // Pfadanteil in den Download bringen.
+  const brandSlug = input.brandSlug ?? DEFAULT_BRAND.slug;
+  if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(brandSlug)) {
+    throw new Error(`Ungültiger Marken-Slug: ${brandSlug}`);
+  }
+
   const dns = input.piholeActive
     ? (input.dnsFiltered ?? DNS_FILTERED_DEFAULT)
     : (input.dnsPlain ?? DNS_PLAIN_DEFAULT);
@@ -137,9 +151,7 @@ export function buildWireguardConfig(
   return {
     content: lines.join("\n"),
     dns,
-    suggestedFileName: input.piholeActive
-      ? "dachvpn-pihole.conf"
-      : "dachvpn.conf",
+    suggestedFileName: `${brandSlug}${input.piholeActive ? "-pihole" : ""}.conf`,
   };
 }
 
