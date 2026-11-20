@@ -18,6 +18,11 @@ import { readFileSync } from "node:fs";
 const README_URL = new URL("../README.md", import.meta.url);
 const SUMMARY = /Tests\s+(\d+) passed/;
 
+/** Vitest färbt die Zusammenfassung im CI ein; ANSI-Codes raus vor dem Vergleich. */
+function plain(text) {
+  return text.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 let expected = null;
 try {
   const readme = readFileSync(README_URL, "utf8");
@@ -47,7 +52,7 @@ if (run.status !== 0) {
   process.exit(run.status ?? 1);
 }
 
-const actual = (run.stdout ?? "").match(SUMMARY);
+const actual = plain(run.stdout ?? "").match(SUMMARY);
 if (!actual) {
   console.error("Zusammenfassung „Tests  <n> passed“ nicht gefunden — Ausgabeformat von Vitest geändert?");
   process.exit(1);
