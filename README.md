@@ -21,11 +21,15 @@ supabase/migrations     Schema/RLS (0001), IPAM (0002), Registrierung (0003),
 supabase/functions      Edge Function register-device (Deno)
 scripts/                DB-Tests (IPAM, Registrierung, RLS, Abo, Mandanten,
                         Gate, Fehlerabbildung), HTTP-Tests der Routen mit Stub,
-                        Auth-Route-E2E, Prüfung der Angebotszahlen
-docs/                   ENV-Liste, Testebenen, Hardware-Anforderungen
-.github/workflows       CI: quality, database, auth, dashboard-auth
+                        Auth-Route-E2E, Doku-Prüfung, Prüfung der Angebotszahlen
+docs/                   ENV-Liste, Testebenen, Hardware-Anforderungen,
+                        RPC-Invarianten
+.github/workflows       CI: quality, database, auth, dashboard-auth;
+                        Doku-Links, CI-Wächter
 .github/actions         Composite-Action `supabase-local`
 ```
+
+Doku unter [`docs/`](docs/): [ENV-Liste](docs/env.md) · [Hardware-Anforderungen](docs/hardware-hetzner.md) · [RPC-Invarianten](docs/rpc-invarianten.md)
 
 ## Schnellstart
 

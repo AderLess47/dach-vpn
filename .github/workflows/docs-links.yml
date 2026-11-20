@@ -1,0 +1,32 @@
+name: Doku-Links
+
+# Auf push läuft der Workflow nur, wenn sich etwas ändert, was die Prüfung
+# liest: die Doku, die README, die Migrationen, das Skript selbst und dieser
+# Workflow. Auf pull_request bewusst ohne paths-Filter: der Check ist eine
+# Pflichtprüfung für main, und ein per paths übersprungener Lauf bliebe dort
+# als "expected" offen und würde Merges blockieren.
+on:
+  push:
+    branches: ["main", "freebuff/**"]
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "supabase/migrations/**"
+      - "scripts/check-docs-links.mjs"
+      - ".github/workflows/docs-links.yml"
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: docs-links-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  links:
+    name: Relative Links in docs/ und README.md
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Kein bun install: das Skript nutzt nur Node-Bordmittel.
+      - name: Prüfen
+        run: node scripts/check-docs-links.mjs

@@ -1,0 +1,39 @@
+name: CI-Wächter
+
+# Prüft einmal täglich den jüngsten CI-Lauf auf main und öffnet bei Rot ein
+# Issue. Die Einordnung (Abrechnungssperre vs. Testfehler) steht im Issue, weil
+# beide unterschiedlich zu beheben sind: bei einer Sperre startet kein Runner,
+# dann ist kein Codefehler zu suchen.
+#
+# schedule läuft nur auf dem Default-Branch; auf Feature-Branches gibt es den
+# Wächter deshalb nicht. workflow_dispatch dient dem manuellen Prüfen.
+on:
+  schedule:
+    # 06:00 UTC, nach dem üblichen Tageslauf und vor dem Arbeitsbeginn in Europa.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  # Für die Annotationen, aus denen die Abrechnungssperre hervorgeht.
+  checks: read
+
+concurrency:
+  group: ci-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Roten CI-Lauf auf main melden
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # Kein bun install: das Skript nutzt nur Node-Bordmittel.
+      - name: Prüfen
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_WORKFLOW: ci.yml
+          CI_BRANCH: main
+        run: node scripts/ci-watch.mjs
