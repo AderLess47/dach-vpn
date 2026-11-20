@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-// Wächter für den CI-Lauf auf main: meldet einen roten Lauf als Issue.
+// Wächter für die Läufe auf main: meldet einen roten Lauf als Issue.
 //
 // Die Einordnung ist der eigentliche Zweck: eine Abrechnungssperre startet
 // keinen Runner (keine Schritte, runner_id 0) und wird in den Billing-
 // Einstellungen behoben, ein Testfehler im Code. Deshalb steht die Einordnung
 // oben im Issue. Ein offenes Issue wird wiederverwendet und beim nächsten
 // grünen Lauf geschlossen, damit nicht täglich ein neues entsteht.
+//
+// Beobachtet werden alle Workflows aus `CI_WORKFLOWS` (Komma-Liste) — je
+// Workflow ein eigenes Issue, damit „CI" und „Doku-Links" nicht im selben
+// Bericht verschwimmen. Der Marker im Issue nennt den Workflow; daran wird das
+// offene Issue auch nach einer Titeländerung wiedergefunden.
 //
 // Nur Node-Bordmittel, wie scripts/check-docs-links.mjs — kein bun install.
 
@@ -15,11 +20,15 @@ import process from "node:process";
 const API = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
 const REPO = process.env.GITHUB_REPOSITORY || "";
 const TOKEN = process.env.GITHUB_TOKEN || "";
-const WORKFLOW = process.env.CI_WORKFLOW || "ci.yml";
+// CI_WORKFLOW ist der alte Einzelwert und bleibt als Rückfall gültig.
+const WORKFLOWS = (process.env.CI_WORKFLOWS || process.env.CI_WORKFLOW || "ci.yml")
+  .split(",")
+  .map((name) => name.trim())
+  .filter(Boolean);
 const BRANCH = process.env.CI_BRANCH || "main";
 
 const ISSUE_TITLE = "CI rot auf main";
-const MARKER = "<!-- ci-watch -->";
+const MARKER = "ci-watch";
 const RED = new Set(["failure", "timed_out", "startup_failure", "action_required"]);
 const BILLING_HINT = /payment|spending limit|billing|abrechnung/i;
 const KIND_LABELS = {
@@ -31,6 +40,10 @@ const KIND_LABELS = {
 function say(line = "") {
   console.log(line);
 }
+
+/** Markerzeile im Issue; `workflow=` findet das Issue wieder, `sha=` entdoppelt. */
+const markerLine = (workflow, sha) => `<!-- ${MARKER} workflow=${workflow} sha=${sha} -->`;
+const workflowMarker = (workflow) => `${MARKER} workflow=${workflow}`;
 
 async function api(path, init = {}) {
   const response = await fetch(API + path, {
@@ -53,16 +66,16 @@ async function api(path, init = {}) {
 const short = (sha) => (sha || "").slice(0, 7);
 const cell = (text) => String(text).replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
 
-async function latestMainRun() {
+async function latestMainRun(workflow) {
   const query = new URLSearchParams({ branch: BRANCH, event: "push", per_page: "5" });
-  const runs = (await api(`/repos/${REPO}/actions/workflows/${WORKFLOW}/runs?${query}`)).workflow_runs || [];
+  const runs = (await api(`/repos/${REPO}/actions/workflows/${workflow}/runs?${query}`)).workflow_runs || [];
   if (!runs.length) {
-    say(`Kein Lauf von ${WORKFLOW} auf ${BRANCH} gefunden.`);
+    say(`${workflow}: kein Lauf auf ${BRANCH} gefunden.`);
     return null;
   }
   const newest = runs[0];
   if (newest.status !== "completed") {
-    say(`Lauf #${newest.run_number} ist noch ${newest.status} — kein Urteil in diesem Tick.`);
+    say(`${workflow}: Lauf #${newest.run_number} ist noch ${newest.status} — kein Urteil in diesem Tick.`);
     return null;
   }
   return newest;
@@ -120,11 +133,11 @@ async function commitInfo(sha) {
   }
 }
 
-function buildReport({ run, commit, info, kind }) {
+function buildReport({ workflow, label, run, commit, info, kind }) {
   const lines = [];
-  lines.push(`${MARKER} sha=${run.head_sha}`);
+  lines.push(markerLine(workflow, run.head_sha));
   lines.push("");
-  lines.push(`## CI auf \`${BRANCH}\` ist rot`);
+  lines.push(`## ${label} auf \`${BRANCH}\` ist rot`);
   lines.push("");
   lines.push(`- Lauf: [#${run.run_number}](${run.html_url}) — \`${run.conclusion}\``);
   const commitLink = `[\`${short(run.head_sha)}\`](${commit?.url || run.html_url})`;
@@ -145,7 +158,7 @@ function buildReport({ run, commit, info, kind }) {
     lines.push("");
     lines.push("Zu prüfen: **Settings → Billing & plans** (Zahlungsmittel, Spending Limit). Ein Re-Run der alten Läufe hilft nicht; neue Pushes laufen erst wieder, wenn die Abrechnung greift.");
   } else if (kind === "startup") {
-    lines.push(`**Der Workflow ist nicht gestartet.** Der Lauf endete mit \`${run.conclusion}\`, ohne einen Job zu protokollieren — typisch für einen Syntaxfehler in \`${WORKFLOW}\` oder einen ungültigen Trigger.`);
+    lines.push(`**Der Workflow ist nicht gestartet.** Der Lauf endete mit \`${run.conclusion}\`, ohne einen Job zu protokollieren — typisch für einen Syntaxfehler in \`${workflow}\` oder einen ungültigen Trigger.`);
   } else {
     lines.push("**Echter Testfehler.** Fehlgeschlagene Jobs und Schritte:");
     lines.push("");
@@ -164,20 +177,27 @@ function buildReport({ run, commit, info, kind }) {
 
   lines.push("");
   lines.push("---");
-  lines.push(`Automatisch erstellt von \`.github/workflows/ci-watch.yml\`. Ein weiterer roter Lauf wird hier kommentiert, ein grüner Lauf auf \`${BRANCH}\` schließt das Issue.`);
+  lines.push(`Automatisch erstellt von \`.github/workflows/ci-watch.yml\` für \`${workflow}\`. Ein weiterer roter Lauf wird hier kommentiert, ein grüner Lauf auf \`${BRANCH}\` schließt das Issue.`);
   return lines.join("\n");
 }
 
-async function findOpenIssue() {
+async function findOpenIssue(workflow) {
   const issues = (await api(`/repos/${REPO}/issues?state=open&per_page=100`)) || [];
-  return issues.find((issue) => issue.title === ISSUE_TITLE && !issue.pull_request && (issue.body || "").includes(MARKER)) || null;
+  return (
+    issues.find(
+      (issue) =>
+        !issue.pull_request &&
+        issue.title.startsWith(ISSUE_TITLE) &&
+        (issue.body || "").includes(workflowMarker(workflow)),
+    ) || null
+  );
 }
 
-async function closeIssue(issue, run) {
+async function closeIssue(issue, run, label) {
   await api(`/repos/${REPO}/issues/${issue.number}/comments`, {
     method: "POST",
     body: JSON.stringify({
-      body: `CI auf \`${BRANCH}\` ist wieder grün: Lauf [#${run.run_number}](${run.html_url}) auf \`${short(run.head_sha)}\`.`,
+      body: `${label} auf \`${BRANCH}\` ist wieder grün: Lauf [#${run.run_number}](${run.html_url}) auf \`${short(run.head_sha)}\`.`,
     }),
   });
   await api(`/repos/${REPO}/issues/${issue.number}`, {
@@ -196,23 +216,23 @@ async function writeSummary(text) {
   }
 }
 
-async function main() {
-  if (!REPO) throw new Error("GITHUB_REPOSITORY fehlt");
-  if (!TOKEN) throw new Error("GITHUB_TOKEN fehlt");
-
-  const openIssue = await findOpenIssue();
-  const run = await latestMainRun();
+/** Prüft einen Workflow; ein Fehler hier darf die anderen nicht verhindern. */
+async function watchWorkflow(workflow) {
+  const run = await latestMainRun(workflow);
   if (!run) return;
 
+  const label = run.name || workflow;
+  const openIssue = await findOpenIssue(workflow);
+
   if (run.conclusion === "cancelled") {
-    say(`Lauf #${run.run_number} wurde abgebrochen — das ist kein Urteil über ${BRANCH}, nichts zu melden.`);
+    say(`${label}: Lauf #${run.run_number} wurde abgebrochen — das ist kein Urteil über ${BRANCH}, nichts zu melden.`);
     return;
   }
 
   if (!RED.has(run.conclusion)) {
-    say(`CI auf ${BRANCH} ist grün (Lauf #${run.run_number}, ${short(run.head_sha)}, ${run.conclusion}).`);
-    if (openIssue) await closeIssue(openIssue, run);
-    await writeSummary(`Grün: Lauf #${run.run_number} auf \`${short(run.head_sha)}\`.`);
+    say(`${label} auf ${BRANCH} ist grün (Lauf #${run.run_number}, ${short(run.head_sha)}, ${run.conclusion}).`);
+    if (openIssue) await closeIssue(openIssue, run, label);
+    await writeSummary(`${label} grün: Lauf #${run.run_number} auf \`${short(run.head_sha)}\`.`);
     return;
   }
 
@@ -220,11 +240,11 @@ async function main() {
   const kind = classify(info);
 
   if (openIssue && (openIssue.body || "").includes(`sha=${run.head_sha}`)) {
-    say(`Lauf #${run.run_number} (${short(run.head_sha)}) steht schon in Issue #${openIssue.number} — kein Duplikat.`);
+    say(`${label}: Lauf #${run.run_number} (${short(run.head_sha)}) steht schon in Issue #${openIssue.number} — kein Duplikat.`);
     return;
   }
 
-  const report = buildReport({ run, commit: await commitInfo(run.head_sha), info, kind });
+  const report = buildReport({ workflow, label, run, commit: await commitInfo(run.head_sha), info, kind });
   const kindLabel = KIND_LABELS[kind];
 
   if (openIssue) {
@@ -239,16 +259,33 @@ async function main() {
       }),
     });
     say(`Issue #${openIssue.number} auf Lauf #${run.run_number} aktualisiert.`);
-    await writeSummary(`Rot (${kindLabel}): Lauf #${run.run_number}, Issue #${openIssue.number} aktualisiert.`);
+    await writeSummary(`${label} rot (${kindLabel}): Lauf #${run.run_number}, Issue #${openIssue.number} aktualisiert.`);
     return;
   }
 
   const issue = await api(`/repos/${REPO}/issues`, {
     method: "POST",
-    body: JSON.stringify({ title: ISSUE_TITLE, body: report, labels: ["bug"] }),
+    body: JSON.stringify({ title: `${ISSUE_TITLE} — ${label}`, body: report, labels: ["bug"] }),
   });
   say(`Issue #${issue.number} geöffnet: ${issue.html_url}`);
-  await writeSummary(`Rot (${kindLabel}): Lauf #${run.run_number}, Issue #${issue.number} geöffnet.`);
+  await writeSummary(`${label} rot (${kindLabel}): Lauf #${run.run_number}, Issue #${issue.number} geöffnet.`);
+}
+
+async function main() {
+  if (!REPO) throw new Error("GITHUB_REPOSITORY fehlt");
+  if (!TOKEN) throw new Error("GITHUB_TOKEN fehlt");
+  if (WORKFLOWS.length === 0) throw new Error("CI_WORKFLOWS ist leer");
+
+  const errors = [];
+  for (const workflow of WORKFLOWS) {
+    try {
+      await watchWorkflow(workflow);
+    } catch (error) {
+      errors.push(`${workflow}: ${error.message}`);
+      say(`${workflow}: Prüfung abgebrochen — ${error.message}`);
+    }
+  }
+  if (errors.length > 0) throw new Error(errors.join("; "));
 }
 
 main().catch((error) => {
