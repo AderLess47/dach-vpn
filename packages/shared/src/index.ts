@@ -185,6 +185,10 @@ export function guardRegisterDevice(payload: unknown): GuardResult {
  * und wird von der Route als 401 behandelt — niemals als anonymer Zugriff.
  */
 export * from "./stripe";
+export * from "./brand";
+export * from "./entitlement";
+export * from "./device-errors";
+export * from "./device-limit";
 
 export function parseBearerToken(
   header: string | null | undefined,

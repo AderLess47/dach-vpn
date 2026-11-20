@@ -8,7 +8,7 @@ Anbieter. Diese Liste enthält nur Namen und Zweck.
 
 | Variable | Zweck | Ab wann |
 |---|---|---|
-| `NEXT_PUBLIC_APP_NAME` | Anzeigename im Dashboard | Sprint 0 |
+| `NEXT_PUBLIC_APP_NAME` | Fallback-Anzeigename, wenn kein Mandant zur Domain passt; leer = Default aus `packages/shared/src/brand.ts` ("HubGuard") | M1 |
 | `NEXT_PUBLIC_APP_URL` | Öffentliche Basis-URL für Checkout-Rücksprünge | M1 (Abo) |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase-Projekt-URL für Client-Calls | M1 (Auth) |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Öffentlicher Anon-Key (RLS schützt die Daten) | M1 (Auth) |
@@ -17,6 +17,37 @@ Anbieter. Diese Liste enthält nur Namen und Zweck.
 
 `NEXT_PUBLIC_*` landet im Browser-Bundle. Dort gehören **keine** Secrets hinein.
 
+Der Anzeigename entsteht **pro Request** in `apps/dashboard/lib/brand.ts` aus dem
+Host. Reihenfolge: Mandant aus der Datenbank → `NEXT_PUBLIC_APP_NAME` → Default
+`HubGuard`. Ein neuer Mandant braucht damit **kein Deployment**:
+
+1. Mandant anlegen (SQL-Editor oder Service-Role):
+
+   ```sql
+   insert into public.tenants (slug, name, tagline)
+   values ('acme-vpn', 'Acme VPN', 'Streaming ohne Umwege')
+   returning id;
+
+   insert into public.tenant_domains (domain, tenant_id)
+   values ('tv.acme.example', '<id aus dem insert>');
+   ```
+
+2. Die Domain muss normalisiert sein: klein, ohne Port, ohne Pfad. Dieselbe Form
+   bildet `normalizeHost()` in `packages/shared`; abweichende Schreibweisen im
+   Host werden serverseitig angeglichen.
+3. Spätestens nach 60 Sekunden greift die Änderung (Cache pro Host), ein
+   Neustart ist nicht nötig. Unbekannte Hosts bekommen die Env-Marke bzw.
+   `HubGuard`.
+
+Die Tabellen `tenants` und `tenant_domains` sind für Endnutzer vollständig
+ gesperrt (RLS ohne Policy); gelesen wird ausschließlich über
+`resolve_tenant_brand()` mit Service-Role. `NEXT_PUBLIC_APP_NAME` ist nur noch
+der Fallback und wird weiterhin beim Build eingebacken.
+
+Dieselbe Marke landet über `bun run mail:render` in den Auth-Mail-Vorlagen —
+pro Mandant mit eigenem Supabase-Projekt (Ablauf und manuelle Schritte:
+[`supabase/templates/README.md`](../supabase/templates/README.md)).
+
 ## Server-seitig (Supabase, Stripe, Knoten)
 
 | Variable | Zweck | Ab wann |
@@ -24,7 +55,7 @@ Anbieter. Diese Liste enthält nur Namen und Zweck.
 | `SUPABASE_URL` | Projekt-URL für Server-Calls | M1 |
 | `SUPABASE_ANON_KEY` | Anon-Key; wird serverseitig zur Token-Verifikation genutzt | M1 |
 | `SUPABASE_SERVICE_ROLE_KEY` | Umgeht RLS; nur Server/Edge Functions, nie Client | Sprint 0 (Persistenz) |
-| `MAX_DEVICES_PER_USER` | Gerätelimit je Konto (Default 5) | M1 |
+| `MAX_DEVICES_PER_USER` | Gerätelimit je Konto (Default 5); gilt in der Route und in der Edge Function gleich | M1 |
 | `ADMIN_USER_IDS` | Kommaseparierte Supabase-User-IDs für `/api/admin/metrics` | M1 |
 | `STRIPE_SECRET_KEY` | Checkout-Sessions, Customer-Portal, Subscription-Reads | M1 |
 | `STRIPE_WEBHOOK_SECRET` | Signaturprüfung der Stripe-Webhooks | M1 |

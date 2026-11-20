@@ -14,15 +14,21 @@ Das Grundschema — Enums, Tabellen, Indizes, RLS-Policies und Grants — steht 
 
 | Skript | Gegenstand | CI-Job, Schritt |
 | --- | --- | --- |
-| `scripts/ipam-loadtest.mjs` (`test:ipam`) | `seed_ip_pool`, `allocate_ip`, `release_ip`, `revoke_device` | IPAM & Registrierung (Integration), „Datenbank-Tests" |
+| `scripts/ipam-loadtest.mjs` (`test:ipam`) | `seed_ip_pool`, `allocate_ip`, `release_ip`, `revoke_device` | IPAM & Registrierung (Integration), „Datenbank-Tests (und README-Zahlen)" |
 | `scripts/registration-integration.mjs` (`test:registration`) | `register_device`, `revoke_device`, `rebind_device_key` | derselbe Schritt |
 | `scripts/rls-test.mjs` (`test:rls`) | Policies, Endnutzer-Sperren, `handle_new_user` | derselbe Schritt |
 | `scripts/subscription-sync-test.mjs` (`test:subscription`) | `apply_subscription_state`, `admin_metrics`, `stripe_events` | derselbe Schritt |
-| `scripts/auth-route-e2e.mjs` (`test:auth-route`) | dieselben Zusicherungen über die Route, gegen den lokalen Supabase-Stack | Auth-Route (lokaler Supabase-Stack), „Auth-Route gegen den Stack prüfen" |
+| `scripts/tenant-brand-test.mjs` (`test:tenants`) | `resolve_tenant_brand`, Endnutzer-Sperren, Constraints der Mandanten-Registry | derselbe Schritt |
+| `scripts/entitlement-test.mjs` (`test:entitlement`) | Abo-Gate in `register_device` und `rebind_device_key`, `sync_device_addon_flag` | derselbe Schritt |
+| `scripts/error-mapping-test.mjs` (`test:errors`) | Abbildung echter Postgres-Fehler auf HTTP-Codes | derselbe Schritt |
+| `scripts/auth-route-e2e.mjs` (`test:auth-route`) | dieselben Zusicherungen über die Route, gegen den lokalen Supabase-Stack | Auth-Route (lokaler Supabase-Stack), „Auth-Route gegen den Stack prüfen (und README-Zahl)" |
 
-`bun run test:db` startet die vier DB-Suiten nacheinander mit `&&`: schlägt eine
-fehl, laufen die folgenden nicht mehr. Jede Suite setzt das Schema `public`
-zurück — nie gegen eine echte Datenbank richten.
+`bun run test:db` startet alle sieben DB-Suiten über
+[`scripts/run-db-suites.mjs`](../scripts/run-db-suites.mjs): eine rote Suite hält
+die übrigen nicht an, am Ende stehen Prüfungszahl, Exit-Status und Dauer je
+Suite, und der Runner vergleicht die Summe mit dem `test:db`-Absatz der README.
+Jede Suite setzt das Schema `public` zurück — nie gegen eine echte Datenbank
+richten.
 
 In den Skripten sammelt `check()` nur Fehlschläge; erst `finish()` beendet den
 Prozess mit Exit 1. Ein fehlgeschlagener Check reißt also nicht sofort ab,
@@ -74,8 +80,10 @@ die Skripte, die die Zusicherungen prüfen.
 
 **`register_device(user, name, platform, key, node, pihole)`** — Migration
 [0003](../supabase/migrations/20261117090003_register_device.sql),
-[0004](../supabase/migrations/20261117090004_auth_binding.sql) · Test
-[registration-integration.mjs](../scripts/registration-integration.mjs)
+[0004](../supabase/migrations/20261117090004_auth_binding.sql),
+[0009](../supabase/migrations/20261120090009_entitlement_gate.sql) · Tests
+[registration-integration.mjs](../scripts/registration-integration.mjs),
+[entitlement-test.mjs](../scripts/entitlement-test.mjs)
 
 - Gerät und Adresse entstehen atomar: erschöpfter Pool → `IP_POOL_EXHAUSTED`
   (`P0001`) **und** die Geräteanzahl bleibt unverändert (Rollback).
@@ -85,9 +93,11 @@ die Skripte, die die Zusicherungen prüfen.
 - ein Public Key, der einem anderen Konto gehört, wird abgelehnt (`P0004`).
 
 **`rebind_device_key(user, device, key)`** — Migration
-[0007](../supabase/migrations/20261118090007_rebind_device_key.sql) · Tests
+[0007](../supabase/migrations/20261118090007_rebind_device_key.sql),
+[0009](../supabase/migrations/20261120090009_entitlement_gate.sql) · Tests
 [registration-integration.mjs](../scripts/registration-integration.mjs),
-[auth-route-e2e.mjs](../scripts/auth-route-e2e.mjs)
+[auth-route-e2e.mjs](../scripts/auth-route-e2e.mjs),
+[entitlement-test.mjs](../scripts/entitlement-test.mjs)
 
 - der Eigentümer bekommt dieselbe Geräte-ID und dieselbe Adresse zurück; nur
   `public_key` ändert sich.
@@ -101,6 +111,44 @@ die Skripte, die die Zusicherungen prüfen.
 - **widerrufenes Gerät** → `DEVICE_REVOKED` (`P0002`); geprüft über die Route in
   `auth-route-e2e.mjs`.
 - für `authenticated` nicht ausführbar (`42501`).
+
+**`resolve_tenant_brand(domain)`** — Migration
+[0008](../supabase/migrations/20261120090008_tenants.sql) · Test
+[tenant-brand-test.mjs](../scripts/tenant-brand-test.mjs)
+
+- die Service-Rolle bekommt Name, Slug und Tagline des Mandanten; der Slug
+  passt zum Format aus `packages/shared/src/brand.ts` und taugt als
+  Config-Dateiname.
+- Großschreibung und Leerraum im Host werden normalisiert (`lower(btrim(…))`).
+- eine unbekannte Domain liefert `NULL`; die App fällt dann auf ihre
+  Standardmarke zurück.
+- `tenants` und `tenant_domains` sind für `authenticated` und `anon` gesperrt
+  (`42501`), ebenso der Aufruf der Funktion — die Mandantenliste ist von außen
+  nicht enumerierbar.
+- Constraints: ungültiger Slug, leerer Name und nicht normalisierte Domain
+  werden mit `23514` abgewiesen, eine doppelte Domain mit `23505`.
+- das Löschen eines Mandanten räumt seine Domains ab (Cascade); die Auflösung
+  liefert danach `NULL`.
+
+**Abo-Gate in `register_device` / `rebind_device_key`** — Migration
+[0009](../supabase/migrations/20261120090009_entitlement_gate.sql) · Test
+[entitlement-test.mjs](../scripts/entitlement-test.mjs)
+
+- ohne Abo, mit `incomplete` oder `canceled` → `SUBSCRIPTION_REQUIRED`
+  (`P0006`); es entsteht weder Gerät noch Adresse.
+- `past_due` erhält Kulanz-Zugang: Stripe mahnt nach einer fehlgeschlagenen
+  Zahlung weiter und kündigt erst danach.
+- `pihole_enabled = true` ohne gebuchtes Add-on → `ADDON_NOT_BOOKED` (`P0007`),
+  ebenfalls ohne Gerät; mit gebuchtem Add-on wird die Einstellung übernommen.
+- wird das Add-on abbestellt, setzt der Trigger `sync_device_addon_flag()`
+  `pihole_enabled` der bestehenden Geräte zurück.
+- der Schlüsselwechsel liegt am selben Gate: aktives Abo ja, ohne Abo `P0006`.
+- die Besitzprüfung bleibt **vor** dem Gate: ein fremdes Gerät meldet auch mit
+  aktivem Abo `DEVICE_NOT_FOUND` (`P0005`).
+- Widerruf bleibt ohne Abo möglich, und ein Retry mit bestehendem Public Key
+  liefert das Gerät idempotent zurück, auch wenn das Abo inzwischen abgelaufen
+  ist.
+- jede vergebene Pool-Adresse gehört zu einem Gerät.
 
 **`apply_subscription_state(…)` / `admin_metrics()` / `stripe_events`** —
 Migration [0005](../supabase/migrations/20261117090005_stripe.sql) · Test
@@ -173,5 +221,8 @@ Damit die Tabelle oben nicht mehr verspricht, als sie hält:
   selbst.
 - die Edge Function `register-device` hat keine Tests (keine Deno-Runtime in der
   CI); geprüft wird die Next.js-Route.
+- das Widerrufen bestehender Geräte bei Ablauf des Abos fehlt: das braucht den
+  Pull-Agenten (M2), der den Soll-Zustand auf dem Knoten entfernt. Bis dahin
+  bleiben bereits ausgegebene Configs gültig.
 - Stripe-Webhook und Checkout nur über `bun run test:stripe` im Testmodus, siehe
   [stripe-test.md](stripe-test.md).

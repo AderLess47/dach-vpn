@@ -32,11 +32,15 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { data } = await admin
+    const { data, error } = await admin
       .from("subscriptions")
       .select("stripe_customer_id")
       .eq("user_id", auth.userId)
       .maybeSingle();
+
+    // Lesefehler ist kein „kein Kunde“: ein 409 würde den Nutzer zum Checkout
+    // schicken, obwohl er längst ein Abo hat. Der catch unten meldet 502.
+    if (error) throw new Error(error.message);
 
     if (!data?.stripe_customer_id) {
       return NextResponse.json(

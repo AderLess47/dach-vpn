@@ -35,7 +35,10 @@ export async function POST(request: Request) {
   const payload = await request.text();
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(payload, signature, secret);
+    // Async, weil Bun/das Worker-Build des SDK keinen synchronen HMAC anbietet
+    // (`constructEvent` wirft dort CryptoProviderOnlySupportsAsyncError). Die
+    // Prüfung ist dieselbe: Signatur über den Rohbody, Toleranz 300 s.
+    event = await stripe.webhooks.constructEventAsync(payload, signature, secret);
   } catch {
     return NextResponse.json({ code: "INVALID_SIGNATURE" }, { status: 400 });
   }

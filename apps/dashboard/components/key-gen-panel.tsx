@@ -9,7 +9,12 @@ import {
   wipePrivateKey,
   type DeviceKeyPair,
 } from "@dachvpn/crypto";
-import { PLATFORMS, type Platform } from "@dachvpn/shared";
+import {
+  hasVpnEntitlement,
+  PLATFORMS,
+  type Brand,
+  type Platform,
+} from "@dachvpn/shared";
 import { supabaseBrowser } from "../lib/supabase-browser";
 
 interface RegisterResponse {
@@ -24,6 +29,11 @@ interface DeviceOption {
   id: string;
   name: string;
   assignedIp: string | null;
+}
+
+interface SubscriptionState {
+  status: string;
+  pihole_addon_active: boolean;
 }
 
 const PLATFORM_LABELS: Record<Platform, string> = {
@@ -52,9 +62,12 @@ function wireguardClientAddress(assignedIp: string | null | undefined): string |
 export function KeyGenPanel({
   accessToken,
   onRegistered,
+  brand,
 }: {
   accessToken: string | null;
   onRegistered?: () => void;
+  /** Marke des Mandanten; kommt vom Server, weil sie vom Host abhängt. */
+  brand: Brand;
 }) {
   const [name, setName] = useState("Wohnzimmer-TV");
   const [platform, setPlatform] = useState<Platform>("firetv");
@@ -68,6 +81,7 @@ export function KeyGenPanel({
   const [devices, setDevices] = useState<DeviceOption[]>([]);
   const [deviceId, setDeviceId] = useState("");
   const [devicesVersion, setDevicesVersion] = useState(0);
+  const [subscription, setSubscription] = useState<SubscriptionState | null>(null);
 
   const selectedDevice = devices.find((device) => device.id === deviceId) ?? null;
   // Adresse bevorzugt aus der Geräteliste: sie überlebt einen Reload, die
@@ -76,21 +90,41 @@ export function KeyGenPanel({
     selectedDevice?.assignedIp ?? result?.device?.assignedIp,
   );
 
+  // Zugangsregeln: Das Abo entscheidet, ob registriert werden darf, das Add-on,
+  // ob der Filter verfügbar ist. Die Durchsetzung passiert serverseitig; hier
+  // wird nur erklärt und verhindert, dass man in eine 403 läuft. Ohne Sitzung
+  // (Trockenlauf) bleibt beides frei, damit die PoC-Seite bedienbar ist.
+  const signedIn = Boolean(accessToken);
+  const entitled = !signedIn || hasVpnEntitlement(subscription?.status);
+  const addonActive = !signedIn || subscription?.pihole_addon_active === true;
+  const piholeActive = addonActive && piholeEnabled;
+
   // Eigene Geräte für die Auswahl laden; RLS liefert nur die des Kontos.
   useEffect(() => {
     let cancelled = false;
 
     async function loadDevices() {
       if (!supabaseBrowser || !accessToken) {
-        if (!cancelled) setDevices([]);
+        if (!cancelled) {
+          setDevices([]);
+          setSubscription(null);
+        }
         return;
       }
 
-      const { data } = await supabaseBrowser
-        .from("devices")
-        .select("id, name, assigned_ip, status")
-        .eq("status", "active")
-        .order("created_at", { ascending: false });
+      // Beides in einem Durchgang: Geräteauswahl und Abo-Status (RLS liefert
+      // nur die eigenen Zeilen). Ohne Abo-Zeile bleibt `subscription` null.
+      const [{ data }, { data: subscriptionRow }] = await Promise.all([
+        supabaseBrowser
+          .from("devices")
+          .select("id, name, assigned_ip, status")
+          .eq("status", "active")
+          .order("created_at", { ascending: false }),
+        supabaseBrowser
+          .from("subscriptions")
+          .select("status, pihole_addon_active")
+          .maybeSingle(),
+      ]);
 
       if (cancelled) return;
       const rows =
@@ -98,6 +132,7 @@ export function KeyGenPanel({
       setDevices(
         rows.map((row) => ({ id: row.id, name: row.name, assignedIp: row.assigned_ip })),
       );
+      setSubscription((subscriptionRow as SubscriptionState | null) ?? null);
     }
 
     void loadDevices();
@@ -138,7 +173,7 @@ export function KeyGenPanel({
           name,
           platform,
           publicKey: pair.publicKeyBase64,
-          piholeEnabled,
+          piholeEnabled: piholeActive,
         };
 
     try {
@@ -202,7 +237,8 @@ export function KeyGenPanel({
         address: clientAddress,
         serverPublicKeyBase64: serverPublicKey,
         endpoint,
-        piholeActive: piholeEnabled,
+        piholeActive,
+        brandSlug: brand.slug,
       });
 
       const blob = new Blob([config.content], {
@@ -227,6 +263,14 @@ export function KeyGenPanel({
 
   return (
     <section className="flex flex-col gap-5 rounded-xl border border-slate-800 bg-slate-900/60 p-6">
+      {signedIn && !entitled && (
+        <p className="rounded-lg border border-amber-900 bg-amber-950/40 p-3 text-sm text-amber-200">
+          Für die Geräteregistrierung ist ein aktives Abo erforderlich. Schließe
+          zuerst das Abo in der Karte oben ab — der Server weist neue Geräte
+          sonst mit 403 ab.
+        </p>
+      )}
+
       <form onSubmit={handleRegister} className="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
@@ -290,15 +334,24 @@ export function KeyGenPanel({
           </p>
         )}
 
-        <label className="flex items-center gap-2 text-sm text-slate-300">
+        <label
+          className={`flex items-center gap-2 text-sm ${addonActive ? "text-slate-300" : "text-slate-500"}`}
+        >
           <input
             type="checkbox"
-            checked={piholeEnabled}
+            checked={piholeActive}
+            disabled={!addonActive}
             onChange={(event) => setPiholeEnabled(event.target.checked)}
-            className="h-4 w-4 rounded border-slate-700 bg-slate-950"
+            className="h-4 w-4 rounded border-slate-700 bg-slate-950 disabled:opacity-40"
           />
           Pi-hole-Add-on aktiv (DNS 10.9.0.1 statt 1.1.1.1)
         </label>
+        {signedIn && !addonActive && (
+          <p className="text-xs text-slate-400">
+            Das Pi-hole-Add-on ist nicht gebucht. Im Abo hinzufügen, dann steht
+            der Filter hier zur Verfügung.
+          </p>
+        )}
 
         <div className="flex flex-wrap gap-3">
           <button
@@ -310,7 +363,7 @@ export function KeyGenPanel({
           </button>
           <button
             type="submit"
-            disabled={busy || !pair}
+            disabled={busy || !pair || !entitled}
             className="rounded-md bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy

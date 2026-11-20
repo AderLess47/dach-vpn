@@ -1,11 +1,14 @@
 import { DeviceConsole } from "../components/device-console";
+import { getRequestBrand } from "../lib/brand";
 
-export default function HomePage() {
+export default async function HomePage() {
+  const brand = await getRequestBrand();
+
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-16">
       <header className="flex flex-col gap-3">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-400">
-          Sprint 1 · Auth + Zero-Knowledge-PoC
+          {brand.name} · Auth + Zero-Knowledge-PoC
         </p>
         <h1 className="text-3xl font-semibold text-slate-50">
           Curve25519-Schlüssel im Browser, Public Key an den Server
@@ -22,7 +25,7 @@ export default function HomePage() {
         </a>
       </header>
 
-      <DeviceConsole />
+      <DeviceConsole brand={brand} />
 
       <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5 text-sm text-slate-400">
         <h2 className="mb-2 font-medium text-slate-200">Was hier noch fehlt</h2>

@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { findPrivateKeyMaterial, PUBLIC_KEY_PATTERN } from "@dachvpn/shared";
+import {
+  describeDeviceFailure,
+  findPrivateKeyMaterial,
+  PUBLIC_KEY_PATTERN,
+} from "@dachvpn/shared";
 import { authenticate, authUnavailableResponse, serviceClient } from "../../../../lib/api-auth";
 
 export const runtime = "nodejs";
@@ -125,36 +129,16 @@ export async function POST(request: Request) {
   });
 
   if (error) {
-    const message = error.message ?? "";
+    // Gemeinsame Abbildung mit der Registrierung; nur der Text unterscheidet
+    // sich, weil die Operation eine andere ist.
+    const failure = describeDeviceFailure(
+      { message: error.message, code: error.code },
+      "rebind",
+    );
 
-    if (message.includes("DEVICE_NOT_FOUND")) {
-      return NextResponse.json(
-        { code: "DEVICE_NOT_FOUND", message: "Dieses Gerät gehört nicht zu deinem Konto." },
-        { status: 404 },
-      );
-    }
-
-    if (message.includes("DEVICE_REVOKED")) {
-      return NextResponse.json(
-        {
-          code: "DEVICE_REVOKED",
-          message: "Dieses Gerät wurde widerrufen. Bitte ein neues Gerät registrieren.",
-        },
-        { status: 409 },
-      );
-    }
-
-    if (error.code === "23505" || message.includes("DEVICE_KEY_CONFLICT")) {
-      return NextResponse.json(
-        { code: "DEVICE_EXISTS", message: "Dieser Schlüssel ist bereits registriert." },
-        { status: 409 },
-      );
-    }
-
-    // Keine DB-Fehlertexte nach außen geben (können Constraints verraten).
     return NextResponse.json(
-      { code: "PERSIST_FAILED", message: "Der Schlüssel konnte nicht gebunden werden." },
-      { status: 502 },
+      { code: failure.code, message: failure.message },
+      { status: failure.status },
     );
   }
 

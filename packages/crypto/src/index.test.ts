@@ -72,7 +72,7 @@ describe("buildWireguardConfig", () => {
     });
     expect(config.dns).toBe(DNS_FILTERED_DEFAULT);
     expect(config.content).toContain(`DNS = ${DNS_FILTERED_DEFAULT}`);
-    expect(config.suggestedFileName).toBe("dachvpn-pihole.conf");
+    expect(config.suggestedFileName).toBe("hubguard-pihole.conf");
   });
 
   it("setzt den ungefilterten DNS ohne Add-on", () => {
@@ -85,6 +85,32 @@ describe("buildWireguardConfig", () => {
     });
     expect(config.dns).toBe(DNS_PLAIN_DEFAULT);
     expect(config.content).toContain("DNS = 1.1.1.1");
+    expect(config.suggestedFileName).toBe("hubguard.conf");
+  });
+
+  it("nimmt den Marken-Slug eines Mandanten für den Dateinamen", () => {
+    const config = buildWireguardConfig({
+      privateKeyBase64: pair.privateKeyBase64,
+      address: "10.8.0.7/32",
+      serverPublicKeyBase64: SERVER_KEY,
+      endpoint: "vpn.example.com:51820",
+      piholeActive: true,
+      brandSlug: "acme-vpn",
+    });
+    expect(config.suggestedFileName).toBe("acme-vpn-pihole.conf");
+  });
+
+  it("verweigert einen Slug, der den Dateinamen verlassen könnte", () => {
+    expect(() =>
+      buildWireguardConfig({
+        privateKeyBase64: pair.privateKeyBase64,
+        address: "10.8.0.7/32",
+        serverPublicKeyBase64: SERVER_KEY,
+        endpoint: "vpn.example.com:51820",
+        piholeActive: false,
+        brandSlug: "../evil",
+      }),
+    ).toThrow(/Marken-Slug/);
   });
 
   it("enthält die für die FRITZ!Box nötigen Felder", () => {
