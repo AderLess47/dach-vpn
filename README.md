@@ -185,10 +185,16 @@ wird von `auth` und `dashboard-auth` genutzt und kapselt alles, was den Stack
 betrifft:
 
 1. `supabase/setup-cli@v3`
-2. `supabase start` — spielt `supabase/migrations` ein; hält auf dem Runner ein
-   Rest-Container einen der Stack-Ports (54321 API, 54322 DB, 54324 Inbucket),
-   wird der Stack aufgeräumt und der Start bis zu dreimal wiederholt, statt den
-   Job vor dem ersten Test rot zu machen
+2. Portbelegung protokollieren, aufräumen, dann `supabase start` — spielt
+   `supabase/migrations` ein. Vor jedem Versuch steht im Log, welcher Prozess
+   (`ss`, mit `sudo` samt PID) und welcher Container die Stack-Ports 54321 API,
+   54322 DB und 54324 Inbucket hält. Entfernt werden eigene Reste
+   (`name=_dachvpn`) **und fremde Container, die einen dieser Host-Ports
+   veröffentlichen** — sonst scheitert der Versuch genau dann wieder, wenn der
+   Halter nicht zum Projekt gehört. Bis zu drei Versuche, statt den Job vor dem
+   ersten Test rot zu machen. Das setzt einen für den Job eigenen Runner voraus
+   (bei GitHub-hosted der Fall); einen Prozess ohne Container protokolliert die
+   Action nur, er bleibt als Ursache im Log sichtbar
 3. `supabase status -o env` → Snapshot in `ci-logs/supabase-status.txt` und
    Export nach `$GITHUB_ENV`:
    - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
