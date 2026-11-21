@@ -25,7 +25,7 @@ scripts/                DB-Tests (IPAM, Registrierung, RLS, Abo, Mandanten,
 docs/                   ENV-Liste, Testebenen, Hardware-Anforderungen,
                         RPC-Invarianten
 .github/workflows       CI: quality, database, auth, dashboard-auth;
-                        Doku-Links, CI-Wächter
+                        Doku-Links, CI-Wächter, Schutz-Wächter
 .github/actions         Composite-Action `supabase-local`
 ```
 
@@ -197,6 +197,22 @@ entfernt die Anführungszeichen aus `supabase status`. Beide Jobs bringen danach
 nur noch ihre eigenen Prüfungen ein — die Startlogik existiert einmal. Wie man
 beides ohne CI nachstellt, steht unter
 [Beide Supabase-Jobs lokal nachstellen](#beide-supabase-jobs-lokal-nachstellen).
+
+### Schutz-Wächter
+
+[`.github/workflows/protection-watch.yml`](.github/workflows/protection-watch.yml)
+prüft täglich und nach jedem CI-Lauf auf `main`, ob die Branch-Protection von
+`main` noch greift: Admin-Durchsetzung (`enforce_admins`), Pull-Request-Pflicht,
+Force-Push, Löschen. Fällt eine davon weg, öffnet `scripts/protection-watch.mjs`
+ein Issue mit Befund und Einstellungspfad; greift die Regel wieder, schließt es
+das Issue. Das ist die Gegenprobe zu einem Direkt-Push wie dem versehentlichen
+`a352fa8`: Die Regel setzt den Push serverseitig durch, der Wächter meldet, wenn
+jemand sie abschaltet.
+
+Die klassische Branch-Protection ist nur mit Adminrechten lesbar (`401` ohne
+Auth), deshalb liest der Wächter das Secret **`PROTECTION_WATCH_TOKEN`**
+(Fine-grained PAT, nur dieses Repo, Berechtigung „Administration: Read-only“).
+Fehlt es, meldet der Wächter das als Issue, statt still grün zu bleiben.
 
 ## Sicherheitsinvariante (nicht verhandelbar)
 

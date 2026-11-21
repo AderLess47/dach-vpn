@@ -1,0 +1,52 @@
+name: Schutz-Wächter
+
+# Meldet als Issue, wenn die Admin-Durchsetzung der Branch-Protection auf main
+# aus ist (Direkt-Push wieder möglich, wie beim versehentlichen Commit a352fa8),
+# die Regel ganz fehlt oder der Wächter sie nicht lesen darf.
+#
+# Die klassische Branch-Protection ist nur mit Adminrechten lesbar — ohne Auth
+# antwortet `GET /branches/main/protection` mit 401, und das `GITHUB_TOKEN`
+# eines Workflows hat diese Rechte nie. Gelesen wird deshalb
+# `PROTECTION_WATCH_TOKEN` (Fine-grained PAT, nur dieses Repo, „Administration:
+# Read-only"); die Issues schreibt das normale `GITHUB_TOKEN`. Fehlt das
+# Lesetoken, öffnet das Skript ein Issue, das genau dieses Secret benennt —
+# ein stiller grüner Lauf wäre schlimmer als kein Wächter. Anlegen:
+# Settings → Secrets and variables → Actions.
+#
+# schedule und workflow_run laufen nur auf dem Default-Branch; auf
+# Feature-Branches gibt es den Wächter deshalb nicht. workflow_dispatch dient
+# dem manuellen Prüfen nach einer Änderung an den Repo-Einstellungen.
+on:
+  schedule:
+    # 06:15 UTC, nach dem CI-Wächter um 06:00.
+    - cron: "15 6 * * *"
+  workflow_run:
+    # Direkt nach dem CI-Lauf auf main, damit eine abgeschaltete Durchsetzung
+    # nicht bis zum nächsten Morgen unbemerkt bleibt.
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: protection-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Admin-Durchsetzung auf main prüfen
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Kein bun install: das Skript nutzt nur Node-Bordmittel.
+      - name: Prüfen
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROTECTION_WATCH_TOKEN: ${{ secrets.PROTECTION_WATCH_TOKEN }}
+          PROTECTION_BRANCH: main
+        run: node scripts/protection-watch.mjs
