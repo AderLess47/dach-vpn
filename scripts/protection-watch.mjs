@@ -1,20 +1,25 @@
 #!/usr/bin/env node
-// Wächter für die Branch-Protection auf main: meldet als Issue, wenn die
-// Admin-Durchsetzung (`enforce_admins`) aus ist, die Regel ganz fehlt oder der
-// Wächter sie nicht lesen darf.
+// Wächter für den Direkt-Push-Schutz auf main. Er prüft zwei Ebenen:
 //
-// Warum ein eigenes Token: die klassische Branch-Protection ist nur mit
-// Adminrechten lesbar — ohne Auth antwortet `GET /branches/{branch}/protection`
-// mit 401, und das `GITHUB_TOKEN` eines Workflows hat diese Rechte nie. Gelesen
-// wird deshalb `PROTECTION_WATCH_TOKEN` (Fine-grained PAT, nur dieses Repo,
-// „Administration: Read-only"); geschrieben (Issues) wird mit dem normalen
-// `GITHUB_TOKEN`. Fehlt das Lesetoken, ist der Wächter blind und sagt das als
-// Issue — ein stiller grüner Lauf wäre schlimmer als gar kein Wächter. Der Lauf
-// bleibt dabei grün, weil der Wächter über Issues meldet und nicht über rote
-// Läufe; sonst stünde main dauerhaft rot, bis jemand das Secret anlegt.
+// 1. Die wirksamen Regeln des Repository-Rulesets — öffentlich lesbar, also
+//    ohne persönliches Token (`GET /rules/branches/{branch}`). Hier zählt:
+//    Pull-Request-Pflicht, die drei Pflicht-Checks, kein Force-Push, kein
+//    Löschen. Fallen sie weg (Ruleset gelöscht oder auf „Disabled“ gestellt),
+//    ist das ein Alarm.
+// 2. Die klassische Branch-Protection über `enforce_admins`. Diesen Zustand
+//    gibt GitHub nur mit Adminrechten heraus (ohne Auth `401`), das
+//    `GITHUB_TOKEN` eines Workflows hat sie nie. Dafür liest der Wächter
+//    `PROTECTION_WATCH_TOKEN` (Fine-grained PAT, nur dieses Repo,
+//    „Administration: Read-only“); geschrieben (Issues) wird mit dem normalen
+//    `GITHUB_TOKEN`.
+//
+// Der PAT ist damit nur noch für `enforce_admins` nötig: Die Sperre selbst
+// hängt am Ruleset, das ohne Bypass-Eintrag auch für Admins gilt. Fehlt der
+// PAT, bleibt dieser eine Punkt ungeprüft und der Wächter sagt das als Issue —
+// er behauptet dann nicht, der Schutz sei weg, sondern nennt die Lücke.
 //
 // Ein offenes Issue wird wiederverwendet (Marker im Body) und bei wieder
-// aktivem Schutz geschlossen, damit nicht täglich ein neues entsteht.
+// vollständigem Schutz geschlossen, damit nicht täglich ein neues entsteht.
 // Nur Node-Bordmittel, wie scripts/ci-watch.mjs — kein bun install.
 
 import { appendFile } from "node:fs/promises";
@@ -28,11 +33,23 @@ const BRANCH = process.env.PROTECTION_BRANCH || "main";
 // Trockenlauf für lokale Prüfungen: druckt den Befund, schreibt nichts.
 const DRY_RUN = process.argv.includes("dry-run") || process.env.DRY_RUN === "1";
 
+// Die Checks, die das Ruleset auf dem Branch verlangt. Der Workflow setzt sie
+// als Umgebungsvariable, damit eine Umbenennung an genau einer Stelle sichtbar
+// wird; die Vorgabe hält den Aufruf ohne CI lauffähig.
+const DEFAULT_CHECKS = [
+  "Typecheck, Tests, Build",
+  "IPAM & Registrierung (Integration)",
+  "Relative Links in docs/ und README.md",
+];
+const REQUIRED_CHECKS = (process.env.PROTECTION_REQUIRED_CHECKS || DEFAULT_CHECKS.join("\n"))
+  .split("\n")
+  .map((name) => name.trim())
+  .filter(Boolean);
+
 const MARKER = "protection-watch";
 const TITLES = {
   weakened: `Branch-Protection auf ${BRANCH} abgeschwächt`,
-  missing: `Branch-Protection auf ${BRANCH} fehlt`,
-  blind: "Schutz-Wächter kann die Branch-Protection nicht prüfen",
+  blind: "Schutz-Wächter kann enforce_admins nicht prüfen",
 };
 
 function say(line = "") {
@@ -75,12 +92,20 @@ async function api(path, init = {}) {
 }
 
 const now = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
-const yesNo = (value) => (value ? "ja" : "nein");
 const pflicht = (value) => (value ? "Pflicht" : "**nicht** Pflicht");
 
+/** Die wirksamen Ruleset-Regeln des Branches — ohne Adminrechte lesbar. */
+async function readRules() {
+  const res = await call(`/repos/${REPO}/rules/branches/${encodeURIComponent(BRANCH)}`, {}, WRITE_TOKEN);
+  if (!res.ok) {
+    return { error: `GitHub antwortet mit ${res.status}: ${(res.text || "").slice(0, 200)}` };
+  }
+  return { rules: Array.isArray(res.data) ? res.data : [] };
+}
+
 /**
- * Die Regel lesen. 404 heißt „keine Schutzregel", 401/403 heißt „kein
- * Leserecht" — beides ist ein Alarm, nur ein anderer.
+ * Die klassische Regel lesen. 404 heißt „keine Schutzregel", 401/403 heißt
+ * „kein Leserecht" — beides ist ein Alarm, nur ein anderer.
  */
 async function readProtection() {
   const res = await call(`/repos/${REPO}/branches/${encodeURIComponent(BRANCH)}/protection`);
@@ -89,7 +114,7 @@ async function readProtection() {
     return {
       state: "blind",
       reason:
-        `GitHub antwortet mit ${res.status}: die Schutzregel ist ohne Adminrechte nicht lesbar. ` +
+        `GitHub antwortet mit ${res.status}: die klassische Regel ist ohne Adminrechte nicht lesbar. ` +
         "Das Secret `PROTECTION_WATCH_TOKEN` fehlt oder hat keine Leserechte.",
     };
   }
@@ -99,24 +124,72 @@ async function readProtection() {
   return { state: "present", protection: res.data || {} };
 }
 
-/** Alles, was einen Direkt-Push auf den Branch wieder möglich macht. */
-function findings(protection) {
+/** Befunde aus der klassischen Regel — alles, was den Admin-Durchgriff öffnet. */
+function protectionFindings(protection) {
   const list = [];
   if (!protection.enforce_admins?.enabled) {
     list.push(
-      "`enforce_admins` ist **aus** — Repository-Admins (und damit der Owner) dürfen wieder direkt pushen.",
+      "`enforce_admins` der klassischen Regel ist **aus** — Repository-Admins dürfen dort wieder vorbei.",
     );
   }
   if (!protection.required_pull_request_reviews) {
-    list.push("Ein Pull Request ist **nicht** mehr Pflicht — jeder mit Schreibrecht darf direkt pushen.");
+    list.push("Die klassische Regel verlangt keinen Pull Request mehr.");
   }
   if (protection.allow_force_pushes?.enabled) {
-    list.push("Force-Push ist erlaubt — Historie auf `main` lässt sich überschreiben.");
+    list.push("Die klassische Regel erlaubt Force-Pushes.");
   }
   if (protection.allow_deletions?.enabled) {
-    list.push("Löschen des Branches ist erlaubt.");
+    list.push("Die klassische Regel erlaubt das Löschen des Branches.");
   }
   return list;
+}
+
+/** Befunde aus den Ruleset-Regeln — die Ebene, die auch Admins blockiert. */
+function ruleFindings(rules) {
+  const list = [];
+  const types = new Set(rules.map((rule) => rule.type));
+
+  if (!types.has("pull_request")) {
+    list.push(
+      `Kein aktives Ruleset verlangt einen Pull Request — ein Direkt-Push auf \`${BRANCH}\` ist damit möglich.`,
+    );
+  }
+  if (!types.has("non_fast_forward")) {
+    list.push(`Kein aktives Ruleset blockiert Force-Pushes auf \`${BRANCH}\`.`);
+  }
+  if (!types.has("deletion")) {
+    list.push(`Kein aktives Ruleset blockiert das Löschen von \`${BRANCH}\`.`);
+  }
+
+  const checkRule = rules.find((rule) => rule.type === "required_status_checks");
+  if (!checkRule) {
+    list.push("Kein aktives Ruleset verlangt die Pflicht-Checks.");
+  } else {
+    const contexts = new Set(
+      (checkRule.parameters?.required_status_checks ?? []).map((entry) => entry.context),
+    );
+    const missing = REQUIRED_CHECKS.filter((name) => !contexts.has(name));
+    if (missing.length > 0) {
+      list.push(`Dem Ruleset fehlen Pflicht-Checks: ${missing.map((name) => `\`${name}\``).join(", ")}.`);
+    }
+  }
+  return list;
+}
+
+function rulesTable(rules) {
+  const types = new Set(rules.map((rule) => rule.type));
+  const checkRule = rules.find((rule) => rule.type === "required_status_checks");
+  const contexts = (checkRule?.parameters?.required_status_checks ?? []).map((entry) => entry.context);
+  return [
+    "| Regel (aus `/rules/branches/…`) | Status |",
+    "| --- | --- |",
+    `| Pull Request vor dem Merge | ${types.has("pull_request") ? "aktiv" : "**fehlt**"} |`,
+    `| Pflicht-Checks | ${
+      contexts.length ? `${contexts.length} von ${REQUIRED_CHECKS.length}` : "**fehlen**"
+    } |`,
+    `| Force-Push blockiert | ${types.has("non_fast_forward") ? "ja" : "**nein**"} |`,
+    `| Löschen blockiert | ${types.has("deletion") ? "ja" : "**nein**"} |`,
+  ];
 }
 
 function settingsTable(protection) {
@@ -125,7 +198,7 @@ function settingsTable(protection) {
   return [
     "| Einstellung | Wert |",
     "| --- | --- |",
-    `| Admins unterliegen der Regel (\`enforce_admins\`) | ${protection.enforce_admins?.enabled ? "ja" : "**nein**"} |`,
+    `| Admins unterliegen der klassischen Regel (\`enforce_admins\`) | ${protection.enforce_admins?.enabled ? "ja" : "**nein**"} |`,
     `| Pull Request vor dem Merge | ${pflicht(protection.required_pull_request_reviews)} |`,
     `| Erforderliche Checks | ${contexts.length ? contexts.length : "**keine**"} |`,
     `| Force-Push erlaubt | ${protection.allow_force_pushes?.enabled ? "**ja**" : "nein"} |`,
@@ -134,90 +207,108 @@ function settingsTable(protection) {
 }
 
 const FIXES = {
+  rulesPullRequest:
+    "**Settings → Rules → Rulesets**: das Ruleset für `main` prüfen, Enforcement „Active“, und „Require a pull request before merging“ aktivieren.",
+  rulesForcePush: "**Settings → Rules → Rulesets**: „Block force pushes“ aktivieren.",
+  rulesDeletion: "**Settings → Rules → Rulesets**: „Restrict deletions“ aktivieren.",
+  rulesChecks:
+    `**Settings → Rules → Rulesets**: „Require status checks to pass“ mit genau diesen Kontexten aktivieren: ${REQUIRED_CHECKS.map(
+      (name) => `\`${name}\``,
+    ).join(", ")}.`,
   enforceAdmins:
-    "**Settings → Rules → Branches → `main`** öffnen und bei „Do not allow bypassing the above settings“ den Haken setzen. Ein Direkt-Push wird danach serverseitig mit `GH006` abgelehnt.",
-  pullRequest:
-    "**Settings → Rules → Branches → `main`** öffnen und „Require a pull request before merging“ aktivieren.",
-  forcePush: "**Settings → Rules → Branches → `main`**: „Allow force pushes“ abschalten.",
-  deletions: "**Settings → Rules → Branches → `main`**: „Allow deletions“ abschalten.",
+    "**Settings → Branches → `main`**: „Do not allow bypassing the above settings“ setzen. Ein Direkt-Push wird danach serverseitig mit `GH006` abgelehnt.",
+  pullRequest: "**Settings → Branches → `main`**: „Require a pull request before merging“ aktivieren.",
+  forcePush: "**Settings → Branches → `main`**: „Allow force pushes“ abschalten.",
+  deletions: "**Settings → Branches → `main`**: „Allow deletions“ abschalten.",
 };
 
-function fixesFor(protection) {
+function fixesFor({ ruleList, protectionList, protection }) {
   const fixes = [];
-  if (!protection.enforce_admins?.enabled) fixes.push(FIXES.enforceAdmins);
-  if (!protection.required_pull_request_reviews) fixes.push(FIXES.pullRequest);
-  if (protection.allow_force_pushes?.enabled) fixes.push(FIXES.forcePush);
-  if (protection.allow_deletions?.enabled) fixes.push(FIXES.deletions);
-  return fixes;
+  if (ruleList.length > 0) {
+    if (ruleList.some((entry) => entry.includes("Pull Request"))) fixes.push(FIXES.rulesPullRequest);
+    if (ruleList.some((entry) => entry.includes("Force-Push"))) fixes.push(FIXES.rulesForcePush);
+    if (ruleList.some((entry) => entry.includes("Löschen von"))) fixes.push(FIXES.rulesDeletion);
+    if (ruleList.some((entry) => entry.includes("Pflicht-Checks"))) fixes.push(FIXES.rulesChecks);
+  }
+  if (protection) {
+    if (protectionList.some((entry) => entry.includes("enforce_admins"))) fixes.push(FIXES.enforceAdmins);
+    if (protectionList.some((entry) => entry.includes("keinen Pull Request"))) fixes.push(FIXES.pullRequest);
+    if (protectionList.some((entry) => entry.includes("Force-Pushes"))) fixes.push(FIXES.forcePush);
+    if (protectionList.some((entry) => entry.includes("Löschen"))) fixes.push(FIXES.deletions);
+  }
+  return [...new Set(fixes)];
 }
 
-function buildReport(protection) {
-  const list = findings(protection);
+function buildReport({ ruleList, protectionList, rules, protection, ruleError, blindReason }) {
   const lines = [header("weakened"), ""];
   lines.push(`## Branch-Protection auf \`${BRANCH}\` ist abgeschwächt`);
   lines.push("");
   lines.push(`- Geprüft: ${now()}`);
-  lines.push(`- Direkt-Push auf \`${BRANCH}\` ist wieder möglich.`);
+  lines.push(`- Befunde aus der wirksamen Regel (Ruleset) und der klassischen Regel.`);
   lines.push("");
   lines.push("### Befund");
   lines.push("");
-  for (const entry of list) lines.push(`- ${entry}`);
+  for (const entry of ruleList) lines.push(`- ${entry}`);
+  for (const entry of protectionList) lines.push(`- ${entry}`);
   lines.push("");
-  lines.push("### Einstellungen");
+  lines.push("### Wirksame Regeln (ohne persönliches Token geprüft)");
   lines.push("");
-  lines.push(...settingsTable(protection));
+  if (rules) lines.push(...rulesTable(rules));
+  else lines.push(`> Nicht lesbar — ${ruleError || "unbekannter Fehler"}`);
+  lines.push("");
+  lines.push("### Klassische Regel (`enforce_admins`)");
+  lines.push("");
+  if (protection) lines.push(...settingsTable(protection));
+  else if (blindReason) lines.push(`> Nicht prüfbar — ${blindReason}`);
+  else lines.push("> Keine klassische Schutzregel vorhanden (`404`).");
   lines.push("");
   lines.push("### Was zu tun ist");
   lines.push("");
-  for (const fix of fixesFor(protection)) lines.push(`1. ${fix}`);
+  const fixes = fixesFor({ ruleList, protectionList, protection });
+  if (fixes.length === 0) {
+    lines.push("Den Zustand in den Repository-Einstellungen prüfen (Settings → Rules und Settings → Branches).");
+  } else {
+    for (const fix of fixes) lines.push(`1. ${fix}`);
+  }
   lines.push("");
   lines.push("---");
   lines.push(
     `Automatisch erstellt von \`.github/workflows/protection-watch.yml\` für \`${BRANCH}\`. ` +
-      "Ein weiterer Befund wird hier kommentiert; eine wieder greifende Regel schließt das Issue.",
+      "Ein weiterer Befund wird hier kommentiert; ein wieder vollständiger Schutz schließt das Issue.",
   );
   return lines.join("\n");
 }
 
-function buildMissingReport() {
-  return [
-    header("missing"),
-    "",
-    `## Branch-Protection auf \`${BRANCH}\` fehlt`,
-    "",
-    `- Geprüft: ${now()}`,
-    `- GitHub liefert für \`${BRANCH}\` keine Schutzregel (\`404\`) — jeder mit Schreibrecht kann direkt pushen, auch ohne Pull Request.`,
-    "",
-    "### Was zu tun ist",
-    "",
-    "1. **Settings → Rules → Branches → `main`** öffnen (bzw. „Add branch ruleset“) und die Regel wieder anlegen: Pull Request Pflicht, die drei Checks aus `.github/workflows/ci.yml` und `.github/workflows/docs-links.yml`, keine Force-Pushes, kein Löschen.",
-    "2. Danach „Do not allow bypassing the above settings“ setzen, damit die Regel auch für Admins gilt.",
-    "",
-    "---",
-    `Automatisch erstellt von \`.github/workflows/protection-watch.yml\` für \`${BRANCH}\`. Eine wieder greifende Regel schließt das Issue.`,
-  ].join("\n");
-}
-
-function buildBlindReport(reason) {
-  return [
+function buildBlindReport(reason, rules) {
+  const lines = [
     header("blind"),
     "",
-    "## Schutz-Wächter kann die Branch-Protection nicht prüfen",
+    `## Schutz-Wächter kann \`enforce_admins\` auf \`${BRANCH}\` nicht prüfen`,
     "",
     `- Geprüft: ${now()}`,
     `- Befund: ${reason}`,
     "",
-    "### Was zu tun ist",
+    "Die **wirksamen Ruleset-Regeln** sind davon nicht betroffen — sie werden ohne persönliches Token geprüft:",
     "",
+  ];
+  if (rules) lines.push(...rulesTable(rules));
+  else lines.push("> Regeln in diesem Lauf nicht lesbar.");
+  lines.push("");
+  lines.push("### Was zu tun ist");
+  lines.push("");
+  lines.push(
     "1. Fine-grained PAT anlegen: **Settings → Developer settings → Personal access tokens → Fine-grained tokens**, nur dieses Repository, Berechtigung **Administration: Read-only** (klassisch: Scope `repo`).",
-    "2. Unter **Settings → Secrets and variables → Actions** als `PROTECTION_WATCH_TOKEN` speichern.",
-    "3. Lauf unter **Actions → Schutz-Wächter → Run workflow** neu starten; bei lesbarer Regel schließt sich das Issue selbst.",
-    "",
-    "Ohne dieses Lesetoken ist der Wächter blind: er kann eine abgeschaltete Admin-Durchsetzung nicht erkennen.",
-    "",
-    "---",
-    `Automatisch erstellt von \`.github/workflows/protection-watch.yml\` für \`${BRANCH}\`.`,
-  ].join("\n");
+  );
+  lines.push("2. Unter **Settings → Secrets and variables → Actions** als `PROTECTION_WATCH_TOKEN` speichern.");
+  lines.push("3. Lauf unter **Actions → Schutz-Wächter → Run workflow** neu starten; danach schließt sich das Issue selbst.");
+  lines.push("");
+  lines.push(
+    "Ohne dieses Lesetoken bleibt nur die Admin-Durchsetzung der klassischen Regel ungeprüft; Direkt-Pushes blockiert bereits das Ruleset.",
+  );
+  lines.push("");
+  lines.push("---");
+  lines.push(`Automatisch erstellt von \`.github/workflows/protection-watch.yml\` für \`${BRANCH}\`.`);
+  return lines.join("\n");
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -243,7 +334,7 @@ async function findOpenIssue() {
 
 function preview(state, title, body) {
   say(`[dry-run] Zustand: ${state} — ${title}`);
-  for (const line of body.split("\n").slice(0, 16)) say(`  ${line}`);
+  for (const line of body.split("\n").slice(0, 18)) say(`  ${line}`);
 }
 
 async function publish(state, body, comment) {
@@ -280,7 +371,7 @@ async function publish(state, body, comment) {
 async function clear(comment) {
   const open = await findOpenIssue();
   if (!open) {
-    say("Schutz greift, kein offenes Issue.");
+    say("Schutz vollständig, kein offenes Issue.");
     return;
   }
   if (DRY_RUN) {
@@ -296,7 +387,7 @@ async function clear(comment) {
     body: JSON.stringify({ state: "closed", state_reason: "completed" }),
   });
   say(`Issue #${open.number} kommentiert und geschlossen.`);
-  await writeSummary(`Schutz greift — Issue #${open.number} geschlossen.`);
+  await writeSummary(`Schutz vollständig — Issue #${open.number} geschlossen.`);
 }
 
 async function writeSummary(text) {
@@ -310,43 +401,66 @@ async function writeSummary(text) {
 
 async function main() {
   if (!REPO) throw new Error("GITHUB_REPOSITORY fehlt");
-  if (!READ_TOKEN) throw new Error("weder PROTECTION_WATCH_TOKEN noch GITHUB_TOKEN gesetzt");
+  if (!WRITE_TOKEN) throw new Error("GITHUB_TOKEN fehlt");
 
-  const result = await readProtection();
+  const rulesResult = await readRules();
+  const protectionResult = await readProtection();
 
-  if (result.state === "missing") {
-    await publish("missing", buildMissingReport());
-    return;
-  }
-  if (result.state === "blind") {
-    await publish("blind", buildBlindReport(result.reason));
-    return;
-  }
-
-  const protection = result.protection;
-  const list = findings(protection);
-  if (list.length === 0) {
-    const contexts = protection.required_status_checks?.contexts?.length ?? 0;
-    say(
-      `Schutz auf ${BRANCH} greift: enforce_admins aktiv, PR-Pflicht ja, ${contexts} Pflicht-Check(s), ` +
-        `Force-Push nein, Löschen nein.`,
+  const ruleList = rulesResult.rules ? ruleFindings(rulesResult.rules) : [];
+  const protectionList =
+    protectionResult.state === "present" ? protectionFindings(protectionResult.protection) : [];
+  if (protectionResult.state === "missing") {
+    protectionList.push(
+      "Die klassische Schutzregel fehlt (`404`) — die zweite Ebene mit `enforce_admins` ist weg.",
     );
-    await writeSummary(
-      `Schutz auf \`${BRANCH}\` greift: enforce_admins aktiv, PR-Pflicht ja, ${contexts} Pflicht-Check(s).`,
-    );
-    await clear(
-      `Die Branch-Protection auf \`${BRANCH}\` greift wieder: \`enforce_admins\` aktiv, Pull Request Pflicht, ` +
-        `${contexts} Pflicht-Check(s), keine Force-Pushes, kein Löschen. Geprüft: ${now()}.`,
-    );
-    return;
   }
 
-  say(`Schutz auf ${BRANCH} ist abgeschwächt:`);
-  for (const entry of list) say(`  - ${entry.replace(/`/g, "")}`);
-  await publish(
-    "weakened",
-    buildReport(protection),
-    `Weiterhin abgeschwächt (${now()}): ${list.map((entry) => entry.replace(/`/g, "")).join("; ")}`,
+  const blindParts = [];
+  if (protectionResult.state === "blind") blindParts.push(protectionResult.reason);
+  if (rulesResult.error) blindParts.push(`Die wirksamen Regeln waren nicht lesbar: ${rulesResult.error}`);
+  const blindReason = blindParts.join(" ");
+  const ruleError = rulesResult.error || "";
+
+  if (ruleList.length > 0 || protectionList.length > 0) {
+    say(`Schutz auf ${BRANCH} ist abgeschwächt:`);
+    for (const entry of [...ruleList, ...protectionList]) say(`  - ${entry.replace(/`/g, "")}`);
+    await publish(
+      "weakened",
+      buildReport({
+        ruleList,
+        protectionList,
+        rules: rulesResult.rules,
+        protection: protectionResult.protection,
+        ruleError,
+        blindReason,
+      }),
+      `Weiterhin abgeschwächt (${now()}): ${[...ruleList, ...protectionList]
+        .map((entry) => entry.replace(/`/g, ""))
+        .join("; ")}`,
+    );
+    return;
+  }
+
+  if (blindReason) {
+    say(`Regeln greifen, aber enforce_admins ist ungeprüft: ${blindReason}`);
+    await publish("blind", buildBlindReport(blindReason, rulesResult.rules));
+    return;
+  }
+
+  const contexts = rulesResult.rules?.find((rule) => rule.type === "required_status_checks")
+    ?.parameters?.required_status_checks?.length;
+  say(
+    `Schutz auf ${BRANCH} greift: Ruleset mit PR-Pflicht, ${contexts} Pflicht-Check(s), kein Force-Push, ` +
+      `kein Löschen; enforce_admins aktiv.`,
+  );
+  await writeSummary(
+    `Schutz auf \`${BRANCH}\` greift: Ruleset mit PR-Pflicht, ${contexts} Pflicht-Check(s), kein Force-Push, ` +
+      "kein Löschen; `enforce_admins` aktiv.",
+  );
+  await clear(
+    `Der Schutz auf \`${BRANCH}\` ist wieder vollständig: aktives Ruleset (Pull-Request-Pflicht, ` +
+      `${contexts} Pflicht-Check(s), keine Force-Pushes, kein Löschen) und \`enforce_admins\` aktiv. ` +
+      `Geprüft: ${now()}.`,
   );
 }
 

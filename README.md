@@ -201,18 +201,22 @@ beides ohne CI nachstellt, steht unter
 ### Schutz-Wächter
 
 [`.github/workflows/protection-watch.yml`](.github/workflows/protection-watch.yml)
-prüft täglich und nach jedem CI-Lauf auf `main`, ob die Branch-Protection von
-`main` noch greift: Admin-Durchsetzung (`enforce_admins`), Pull-Request-Pflicht,
-Force-Push, Löschen. Fällt eine davon weg, öffnet `scripts/protection-watch.mjs`
-ein Issue mit Befund und Einstellungspfad; greift die Regel wieder, schließt es
-das Issue. Das ist die Gegenprobe zu einem Direkt-Push wie dem versehentlichen
-`a352fa8`: Die Regel setzt den Push serverseitig durch, der Wächter meldet, wenn
-jemand sie abschaltet.
+prüft täglich und nach jedem CI-Lauf auf `main` zwei Ebenen des Direkt-Push-
+Schutzes und öffnet bei Befund ein Issue mit Einstellungspfad; greift alles
+wieder, schließt es das Issue:
 
-Die klassische Branch-Protection ist nur mit Adminrechten lesbar (`401` ohne
-Auth), deshalb liest der Wächter das Secret **`PROTECTION_WATCH_TOKEN`**
-(Fine-grained PAT, nur dieses Repo, Berechtigung „Administration: Read-only“).
-Fehlt es, meldet der Wächter das als Issue, statt still grün zu bleiben.
+1. **Ruleset** (öffentlich lesbar, ohne persönliches Token): Pull-Request-
+   Pflicht, die drei Pflicht-Checks, kein Force-Push, kein Löschen. Die leere
+   Bypass-Liste gilt auch für Admins.
+2. **Klassische Regel** (`enforce_admins`): nur mit Adminrechten lesbar, deshalb
+   über das Secret **`PROTECTION_WATCH_TOKEN`** (Fine-grained PAT, nur dieses
+   Repo, Berechtigung „Administration: Read-only“). Fehlt es, meldet der
+   Wächter, dass dieser eine Punkt ungeprüft ist — die Ruleset-Ebene blockiert
+   Direkt-Pushes trotzdem.
+
+Das ist die Gegenprobe zu einem Direkt-Push wie dem versehentlichen `a352fa8`:
+Die Regeln setzen den Push serverseitig durch, der Wächter meldet, wenn jemand
+sie abschaltet.
 
 ## Sicherheitsinvariante (nicht verhandelbar)
 
