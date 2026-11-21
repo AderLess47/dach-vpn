@@ -174,15 +174,17 @@ Zusicherung absichtlich brechen und nachsehen, ob genau die zuständige Prüfung
 rot wird.
 
 Der Ablauf bleibt auf einem Wegwerf-Branch; `main` wird nicht angefasst. Die CI
-läuft laut `ci.yml` auch auf `freebuff/**`, solche Branches sind also ein
-geeigneter Ort für die Gegenprobe.
+startet laut `ci.yml` auf Feature-Branches über deren Pull Request (`push` gilt
+nur für `main`) — der Wegwerf-Branch braucht also einen Draft-PR, damit der
+Lauf beginnt.
 
 1. Branch vom aktuellen `main` abzweigen, z. B.
    `freebuff/mutation-rebind-besitz`.
 2. **Genau eine** Zusicherung entfernen. Beispiel `rebind_device_key`: aus
    `if not found or v_device.user_id <> p_user_id then` wird
    `if not found then`.
-3. Pushen und den Lauf abwarten. Erwartet für dieses Beispiel:
+3. Committen, pushen und einen Draft-PR gegen `main` öffnen; der Lauf erscheint
+   am PR. Erwartet für dieses Beispiel:
    - „IPAM & Registrierung (Integration)" → rot, Schritt „Datenbank-Tests":
      FAIL auf „Fremdes Gerät wird per RPC abgelehnt", danach auf „Gerät bleibt
      unverändert".

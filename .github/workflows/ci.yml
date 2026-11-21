@@ -1,8 +1,14 @@
 name: CI
 
+# Ein Push startet genau einen Lauf: `main` über `push`, jeder andere Branch
+# über seinen Pull Request. Stünde `freebuff/**` auch unter `push`, liefe jeder
+# Commit doppelt — einmal auf `refs/heads/…`, einmal auf `refs/pull/N/merge` —
+# und `concurrency` könnte das nicht verhindern, weil die Refs verschieden
+# sind. Ohne PR läuft auf einem Branch also nichts; die Gegenprobe per Mutation
+# braucht deshalb einen Draft-PR.
 on:
   push:
-    branches: ["main", "freebuff/**"]
+    branches: ["main"]
   pull_request:
 
 concurrency:
