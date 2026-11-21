@@ -12,7 +12,7 @@
 // Bericht verschwimmen. Der Marker im Issue nennt den Workflow; daran wird das
 // offene Issue auch nach einer Titeländerung wiedergefunden.
 //
-// Nur Node-Bordmittel, wie scripts/check-docs-links.mjs — kein bun install.
+// Nur Node-Bordmittel, wie scripts/check-docs.mjs — kein bun install.
 
 import { appendFile } from "node:fs/promises";
 import process from "node:process";

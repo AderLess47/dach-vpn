@@ -18,7 +18,6 @@
     "check:unit-count": "node scripts/check-unit-count.mjs",
     "check": "bun run check:docs && bun run mail:check && bun run typecheck",
     "check:docs": "node scripts/check-docs.mjs",
-    "check:docs:links": "node scripts/check-docs-links.mjs",
     "check:render": "node scripts/check-dashboard-render.mjs",
     "check:render:dry": "node scripts/check-dashboard-render.mjs dry",
     "mail:render": "bun scripts/render-mail-templates.mjs",
