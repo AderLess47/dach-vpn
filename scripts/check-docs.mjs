@@ -359,7 +359,9 @@ for (const line of ciSection.split("\n")) {
 for (const [job, tokens] of [...ciJobScripts()].sort()) {
   const row = rowContent.get(job) ?? "";
   const missing = tokens.filter((token) => !row.includes(token.toLowerCase()));
-  const ok = tokens.length > 0 && missing.length === 0;
+  // Ein Job ganz ohne Skript (z. B. nur docker und ss) hat nichts zu
+  // vergleichen; „0/0“ ist dort in Ordnung und kein Befund.
+  const ok = missing.length === 0;
   for (const token of missing) {
     problems.push(`${job}: \`${token}\` fehlt in der README-Zeile`);
   }

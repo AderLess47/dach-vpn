@@ -232,3 +232,73 @@ jobs:
           path: ci-logs/
           retention-days: 7
           if-no-files-found: warn
+
+  # Nachweis der Host-Netzwerk-Erkennung an einem echten Container: Ein Halter
+  # mit `--network host` hat keine Portabbildung und war für die Erkennung über
+  # das Ports-Feld unsichtbar. Der Job startet genau diesen Fall vor der
+  # Composite-Action. Deren Protokoll muss ihn nennen und das Aufräumen ihn
+  # entfernen — sonst scheitert schon `supabase start` an Port 54324.
+  supabase-port-holder:
+    name: Host-Netzwerk-Halter auf 54324
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Fremden Halter ohne Portabbildung starten
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          # BusyBox-nc hält 54324; im Host-Netzwerk liegt der Listener direkt
+          # auf dem Runner, im Ports-Feld von `docker ps` steht nichts.
+          docker run -d --name hostnet-holder --network host alpine:3.20 \
+            sh -c 'while true; do nc -l -p 54324; done'
+
+          for _ in $(seq 1 30); do
+            if ss -ltn | grep -E ':54324([^0-9]|$)' >/dev/null; then break; fi
+            sleep 1
+          done
+
+          docker ps --format 'table {{.Names}}\t{{.Networks}}\t{{.Ports}}'
+          if ! ss -ltn | grep -E ':54324([^0-9]|$)' >/dev/null; then
+            echo "::error::Der Halter belegt 54324 nicht; der Test wäre wertlos."
+            docker logs hostnet-holder || true
+            exit 1
+          fi
+          mapped=$(docker ps --format '{{.Names}}|{{.Ports}}' | awk -F'|' '$1 == "hostnet-holder" { print $2 }')
+          if [ -n "$mapped" ]; then
+            echo "::error::Der Halter hat eine Portabbildung ($mapped); geprüft werden soll der Host-Netzwerk-Fall."
+            exit 1
+          fi
+      - uses: ./.github/actions/supabase-local
+      # Zweiter Teil des Nachweises: Der fremde Halter ist weg, 54324 gehört
+      # Inbucket aus dem eigenen Stack.
+      - name: Halter entfernt, Stack läuft
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          if docker inspect hostnet-holder >/dev/null 2>&1; then
+            echo "::error::Der Host-Netzwerk-Halter lebt noch — die Erkennung hat ihn nicht entfernt."
+            docker ps -a --filter name=hostnet-holder
+            exit 1
+          fi
+          if ! docker ps --format '{{.Names}}' | grep -E '^supabase_inbucket_' >/dev/null; then
+            echo "::error::Kein Inbucket-Container des eigenen Stacks gefunden."
+            docker ps --format 'table {{.Names}}\t{{.Ports}}'
+            exit 1
+          fi
+          docker ps --format 'table {{.Names}}\t{{.Networks}}\t{{.Ports}}' | tee ci-logs/docker-ps.txt
+          supabase status | tee ci-logs/supabase-status.txt
+      - name: Logs einsammeln
+        if: failure()
+        run: |
+          mkdir -p ci-logs
+          docker logs hostnet-holder > ci-logs/hostnet-holder.log 2>&1 || true
+          docker ps -a > ci-logs/docker-ps.txt 2>&1 || true
+          ss -ltnp > ci-logs/listeners.txt 2>&1 || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: supabase-port-holder-logs
+          path: ci-logs/
+          retention-days: 7
+          if-no-files-found: warn

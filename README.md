@@ -163,7 +163,7 @@ Aufräumen mit `supabase stop`.
 
 ## CI
 
-Vier Jobs in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), alle auf
+Fünf Jobs in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), alle auf
 `ubuntu-latest` mit Bun 1.4.x:
 
 | Job | Inhalt | Artefakt bei Fehlschlag |
@@ -172,6 +172,7 @@ Vier Jobs in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), alle auf
 | `database` | `bun run test:db` gegen einen `postgres:16`-Service: IPAM, Registrierung, RLS, Abo, Mandanten, Gate, Fehlerabbildung | `database-logs` — Container-Log der Datenbank |
 | `auth` | Lokaler Supabase-Stack, `bun run build`, Serverstart, `bun run test:auth-route` (28 Prüfungen) | `auth-route-logs` — E2E-Ausgabe, Build- und Server-Log, `supabase status`, `docker ps` |
 | `dashboard-auth` | Lokaler Supabase-Stack, Build mit `NEXT_PUBLIC_*`, 6 Render-Prüfungen der Startseite (`bun run check:render`) | `dashboard-auth-logs` — `page.html`, Build- und Server-Log, `supabase status` |
+| `supabase-port-holder` | Echter Fremd-Halter auf 54324: Container mit `--network host` ohne Portabbildung, dann die Composite-Action — ihr Protokoll muss den Halter nennen und das Aufräumen ihn entfernen, sonst scheitert `supabase start`; danach Prüfung, dass der Halter weg ist und Inbucket aus dem eigenen Stack läuft | `supabase-port-holder-logs` — Halter-Log, `docker ps -a`, Listener je Port, `supabase status` |
 
 Artefakte entstehen nur bei Fehlschlag (`if: failure()`), liegen 7 Tage bereit
 und sind im Actions-Lauf unter „Artifacts“ herunterzuladen — pro Job ein Archiv
@@ -195,11 +196,13 @@ betrifft:
    Container-ID zugeordnet; ohne PID (kein `sudo`) sucht die Action den
    Listener im Container selbst. Entfernt werden eigene Reste
    (`name=_dachvpn`) **und fremde Container, die einen dieser Ports halten** —
-   sonst scheitert der Versuch genau dann wieder, wenn der Halter nicht zum
-   Projekt gehört. Bis zu drei Versuche, statt den Job vor dem
+   sonst scheitert der Versuch genau dann wieder, wenn der    Halter nicht zum Projekt gehört. Bis zu drei Versuche, statt den Job vor dem
    ersten Test rot zu machen. Das setzt einen für den Job eigenen Runner voraus
    (bei GitHub-hosted der Fall); einen Prozess ohne Container protokolliert die
-   Action nur, er bleibt als Ursache im Log sichtbar
+   Action nur, er bleibt als Ursache im Log sichtbar. Der CI-Job
+   `supabase-port-holder` stellt den Host-Netzwerk-Fall an einem echten
+   Container nach: er startet `alpine` mit `--network host` auf 54324, lässt die
+   Action laufen und scheitert, wenn der Halter das Aufräumen überlebt
 3. `supabase status -o env` → Snapshot in `ci-logs/supabase-status.txt` und
    Export nach `$GITHUB_ENV`:
    - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
