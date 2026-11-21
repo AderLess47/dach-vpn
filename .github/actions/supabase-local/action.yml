@@ -42,25 +42,84 @@ runs:
           fi
         }
 
-        # Container, die einen Stack-Port als Host-Port veröffentlichen —
-        # erkannt an der Portabbildung ":<port>->" im Ports-Feld und damit
-        # unabhängig vom Projektnamen.
-        port_containers() {
+        # Container mit Portabbildung auf einen Stack-Port — erkannt an
+        # ":<port>->" im Ports-Feld und damit unabhängig vom Projektnamen.
+        mapped_containers() {
           { docker ps --format '{{.ID}} {{.Names}} {{.Ports}}' 2>/dev/null || true; } \
             | awk -v p=":$1->" 'index($0, p)'
+        }
+
+        # Laufende Container im Host-Netzwerk. Sie veröffentlichen keine
+        # Ports: ihr Listener liegt direkt auf dem Host und taucht im
+        # Ports-Feld von `docker ps` nicht auf.
+        host_network_containers() {
+          docker ps --filter network=host --format '{{.ID}} {{.Names}}' 2>/dev/null || true
+        }
+
+        # Container-ID zu einer Listener-PID. /proc/<pid>/cgroup nennt sie bei
+        # den üblichen Runtimes; ohne passwortloses sudo liefert `ss` keine
+        # PID, dann bleibt das Ergebnis leer.
+        container_of_pid() {
+          [ -n "${1:-}" ] || return 0
+          { cat "/proc/$1/cgroup" 2>/dev/null || true; } \
+            | grep -oE '[0-9a-f]{64}' | head -n1 || true
+        }
+
+        # PIDs der Listener eines Ports aus `ss -ltnp`
+        # ("users:((\"ss\",pid=42,fd=4))"); leer, wenn `ss` keine PID nennt.
+        listener_pids() {
+          listeners | grep -E ":$1([^0-9]|$)" \
+            | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true
+        }
+
+        # Host-Netzwerk-Container, die den Port halten. Erste Wahl ist die
+        # Zuordnung über die PID des Host-Listeners; gibt es keine PID (kein
+        # sudo), wird im Container selbst nach dem Listener gesucht.
+        host_network_port_containers() {
+          local port="$1" hosts pid cid id held=""
+          hosts=$(host_network_containers)
+          [ -n "$hosts" ] || return 0
+          for pid in $(listener_pids "$port"); do
+            cid=$(container_of_pid "$pid")
+            [ -n "$cid" ] || continue
+            held+=$(printf '%s\n' "$hosts" | awk -v id="${cid:0:12}" 'index($1, id)')$'\n'
+          done
+          if [ -z "$held" ]; then
+            while read -r id _; do
+              [ -n "$id" ] || continue
+              if docker exec "$id" sh -c 'ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null' 2>/dev/null \
+                | grep -E ":${port}([^0-9]|$)" >/dev/null; then
+                held+=$(printf '%s\n' "$hosts" | awk -v id="$id" 'index($1, id)')$'\n'
+              fi
+            done <<< "$hosts"
+          fi
+          printf '%s' "$held" | awk 'NF' | sort -u
+        }
+
+        # Alle Container, die einen Stack-Port halten: per Portabbildung oder
+        # über das Host-Netzwerk. Ausgabe je Zeile "ID Name [Ports]".
+        port_containers() {
+          mapped_containers "$1"
+          host_network_port_containers "$1"
         }
 
         # Vor dem Aufräumen protokollieren, wer die Ports hält: sonst bleibt
         # beim Fehlschlag nur der CLI-Text, der den Halter nicht nennt.
         report_port_holders() {
-          local port found
+          local port found mapped hostnet
           echo "::group::Portbelegung vor dem Aufräumen"
           for port in "${stack_ports[@]}"; do
             echo "— Port $port —"
             found=$(listeners | grep -E ":${port}([^0-9]|$)" || true)
             if [ -n "$found" ]; then echo "$found"; else echo "  kein Listener"; fi
-            found=$(port_containers "$port")
-            if [ -n "$found" ]; then echo "$found"; else echo "  kein Container"; fi
+            mapped=$(mapped_containers "$port")
+            hostnet=$(host_network_port_containers "$port")
+            if [ -n "$mapped" ]; then echo "$mapped"; fi
+            if [ -n "$hostnet" ]; then
+              echo "  Host-Netzwerk (ohne Portabbildung):"
+              printf '%s\n' "$hostnet" | sed 's/^/    /'
+            fi
+            if [ -z "$mapped" ] && [ -z "$hostnet" ]; then echo "  kein Container"; fi
           done
           echo "::endgroup::"
         }
@@ -75,9 +134,10 @@ runs:
           # docker-proxy hält den Port weiter.
           docker ps -aq --filter "name=_dachvpn" | xargs -r docker rm -f >/dev/null 2>&1 || true
 
-          # Fremde Container auf den Stack-Ports. Der Runner gehört dem Job;
-          # ein fremder Container ist hier ein Rest eines früheren Laufs auf
-          # einem wiederverwendeten Runner und sonst nicht zu beseitigen.
+          # Fremde Container auf den Stack-Ports, auch solche im
+          # Host-Netzwerk ohne Portabbildung. Der Runner gehört dem Job; ein
+          # fremder Container ist hier ein Rest eines früheren Laufs auf einem
+          # wiederverwendeten Runner und sonst nicht zu beseitigen.
           local ids
           ids=$(for port in "${stack_ports[@]}"; do port_containers "$port"; done \
             | awk '{print $1}' | sort -u)
@@ -102,6 +162,8 @@ runs:
         if [ "$started" != "1" ]; then
           echo "::error::supabase start ist dreimal fehlgeschlagen."
           docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
+          echo "Container im Host-Netzwerk (ohne Portabbildung):"
+          host_network_containers || true
           listeners | grep -E ':(54321|54322|54324)([^0-9]|$)' \
             || echo "Kein Listener auf 54321/54322/54324."
           exit 1

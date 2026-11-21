@@ -188,10 +188,15 @@ betrifft:
 2. Portbelegung protokollieren, aufräumen, dann `supabase start` — spielt
    `supabase/migrations` ein. Vor jedem Versuch steht im Log, welcher Prozess
    (`ss`, mit `sudo` samt PID) und welcher Container die Stack-Ports 54321 API,
-   54322 DB und 54324 Inbucket hält. Entfernt werden eigene Reste
-   (`name=_dachvpn`) **und fremde Container, die einen dieser Host-Ports
-   veröffentlichen** — sonst scheitert der Versuch genau dann wieder, wenn der
-   Halter nicht zum Projekt gehört. Bis zu drei Versuche, statt den Job vor dem
+   54322 DB und 54324 Inbucket hält. Container werden über die Portabbildung
+   (`:54321->` im Ports-Feld) **und über das Host-Netzwerk** erkannt: ein
+   Container mit `--network host` veröffentlicht keine Ports, seine Listener
+   stehen nur auf dem Host. Er wird über die PID des Host-Listeners der
+   Container-ID zugeordnet; ohne PID (kein `sudo`) sucht die Action den
+   Listener im Container selbst. Entfernt werden eigene Reste
+   (`name=_dachvpn`) **und fremde Container, die einen dieser Ports halten** —
+   sonst scheitert der Versuch genau dann wieder, wenn der Halter nicht zum
+   Projekt gehört. Bis zu drei Versuche, statt den Job vor dem
    ersten Test rot zu machen. Das setzt einen für den Job eigenen Runner voraus
    (bei GitHub-hosted der Fall); einen Prozess ohne Container protokolliert die
    Action nur, er bleibt als Ursache im Log sichtbar
