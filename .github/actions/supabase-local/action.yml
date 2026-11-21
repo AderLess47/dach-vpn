@@ -6,14 +6,40 @@ description: >-
 runs:
   using: composite
   steps:
+    # Exakt pinnen: die Service-Images des lokalen Stacks (auch Postgres)
+    # stecken im CLI-Binary, ein "latest" zieht sie unbemerkt mit und kann die
+    # CI ohne Codeänderung rot machen. 3.2.0 bringt
+    # public.ecr.aws/supabase/postgres:17.12.0.000 mit.
     - uses: supabase/setup-cli@v3
       with:
-        version: latest
+        version: 3.2.0
 
     # `supabase start` spielt supabase/migrations beim ersten Start ein.
     - name: Stack starten
       shell: bash
       run: supabase start
+
+    # Das Postgres-Image lässt sich nicht in config.toml setzen; es kommt aus
+    # dem CLI-Binary. Der Pin oben hält es fest, diese Prüfung macht eine
+    # Abweichung sichtbar, statt sie stillschweigend mitzuziehen.
+    - name: Postgres-Image prüfen
+      shell: bash
+      run: |
+        set -euo pipefail
+        expected="supabase/postgres:17.12.0.000"
+        db_image=$(docker ps --format '{{.Names}} {{.Image}}' | awk '$1 ~ /^supabase_db_/ {print $2; exit}')
+        if [ -z "$db_image" ]; then
+          echo "::error::Kein laufender Container supabase_db_* gefunden."
+          docker ps --format 'table {{.Names}}\t{{.Image}}'
+          exit 1
+        fi
+        case "$db_image" in
+          *"$expected") echo "Postgres-Image gepinnt: $db_image" ;;
+          *)
+            echo "::error::Postgres-Image ist $db_image, erwartet $expected"
+            exit 1
+            ;;
+        esac
 
     # Die Werte landen in $GITHUB_ENV, damit spätere Schritte sie ohne erneutes
     # `eval` sehen. Die Anführungszeichen aus `supabase status -o env` müssen
