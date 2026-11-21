@@ -124,22 +124,34 @@ async function readProtection() {
   return { state: "present", protection: res.data || {} };
 }
 
-/** Befunde aus der klassischen Regel — alles, was den Admin-Durchgriff öffnet. */
+/**
+ * Befunde aus der klassischen Regel — alles, was den Admin-Durchgriff öffnet.
+ * Jeder Befund trägt eine feste Art (`kind`). Die Reparaturhinweise werden
+ * über diese Art zugeordnet, nicht über den Text: Eine Umformulierung darf
+ * keinen Hinweis verschlucken.
+ */
 function protectionFindings(protection) {
   const list = [];
   if (!protection.enforce_admins?.enabled) {
-    list.push(
-      "`enforce_admins` der klassischen Regel ist **aus** — Repository-Admins dürfen dort wieder vorbei.",
-    );
+    list.push({
+      kind: "protection-enforce-admins",
+      text: "`enforce_admins` der klassischen Regel ist **aus** — Repository-Admins dürfen dort wieder vorbei.",
+    });
   }
   if (!protection.required_pull_request_reviews) {
-    list.push("Die klassische Regel verlangt keinen Pull Request mehr.");
+    list.push({
+      kind: "protection-pull-request",
+      text: "Die klassische Regel verlangt keinen Pull Request mehr.",
+    });
   }
   if (protection.allow_force_pushes?.enabled) {
-    list.push("Die klassische Regel erlaubt Force-Pushes.");
+    list.push({ kind: "protection-force-push", text: "Die klassische Regel erlaubt Force-Pushes." });
   }
   if (protection.allow_deletions?.enabled) {
-    list.push("Die klassische Regel erlaubt das Löschen des Branches.");
+    list.push({
+      kind: "protection-deletions",
+      text: "Die klassische Regel erlaubt das Löschen des Branches.",
+    });
   }
   return list;
 }
@@ -150,27 +162,37 @@ function ruleFindings(rules) {
   const types = new Set(rules.map((rule) => rule.type));
 
   if (!types.has("pull_request")) {
-    list.push(
-      `Kein aktives Ruleset verlangt einen Pull Request — ein Direkt-Push auf \`${BRANCH}\` ist damit möglich.`,
-    );
+    list.push({
+      kind: "rules-pull-request",
+      text: `Kein aktives Ruleset verlangt einen Pull Request — ein Direkt-Push auf \`${BRANCH}\` ist damit möglich.`,
+    });
   }
   if (!types.has("non_fast_forward")) {
-    list.push(`Kein aktives Ruleset blockiert Force-Pushes auf \`${BRANCH}\`.`);
+    list.push({
+      kind: "rules-force-push",
+      text: `Kein aktives Ruleset blockiert Force-Pushes auf \`${BRANCH}\`.`,
+    });
   }
   if (!types.has("deletion")) {
-    list.push(`Kein aktives Ruleset blockiert das Löschen von \`${BRANCH}\`.`);
+    list.push({
+      kind: "rules-deletion",
+      text: `Kein aktives Ruleset blockiert das Löschen von \`${BRANCH}\`.`,
+    });
   }
 
   const checkRule = rules.find((rule) => rule.type === "required_status_checks");
   if (!checkRule) {
-    list.push("Kein aktives Ruleset verlangt die Pflicht-Checks.");
+    list.push({ kind: "rules-checks", text: "Kein aktives Ruleset verlangt die Pflicht-Checks." });
   } else {
     const contexts = new Set(
       (checkRule.parameters?.required_status_checks ?? []).map((entry) => entry.context),
     );
     const missing = REQUIRED_CHECKS.filter((name) => !contexts.has(name));
     if (missing.length > 0) {
-      list.push(`Dem Ruleset fehlen Pflicht-Checks: ${missing.map((name) => `\`${name}\``).join(", ")}.`);
+      list.push({
+        kind: "rules-checks",
+        text: `Dem Ruleset fehlen Pflicht-Checks: ${missing.map((name) => `\`${name}\``).join(", ")}.`,
+      });
     }
   }
   return list;
@@ -206,37 +228,32 @@ function settingsTable(protection) {
   ];
 }
 
+// Ein Reparaturhinweis je Befundart. Die Schlüssel sind genau die `kind`-Werte
+// der Befunde; die Reihenfolge der Einträge ist die Reihenfolge im Bericht
+// (erst die Ebene, die auch Admins blockiert, dann die klassische Regel) und
+// hängt nicht davon ab, in welcher Reihenfolge die Befunde entstehen.
 const FIXES = {
-  rulesPullRequest:
+  "rules-pull-request":
     "**Settings → Rules → Rulesets**: das Ruleset für `main` prüfen, Enforcement „Active“, und „Require a pull request before merging“ aktivieren.",
-  rulesForcePush: "**Settings → Rules → Rulesets**: „Block force pushes“ aktivieren.",
-  rulesDeletion: "**Settings → Rules → Rulesets**: „Restrict deletions“ aktivieren.",
-  rulesChecks:
+  "rules-force-push": "**Settings → Rules → Rulesets**: „Block force pushes“ aktivieren.",
+  "rules-deletion": "**Settings → Rules → Rulesets**: „Restrict deletions“ aktivieren.",
+  "rules-checks":
     `**Settings → Rules → Rulesets**: „Require status checks to pass“ mit genau diesen Kontexten aktivieren: ${REQUIRED_CHECKS.map(
       (name) => `\`${name}\``,
     ).join(", ")}.`,
-  enforceAdmins:
+  "protection-enforce-admins":
     "**Settings → Branches → `main`**: „Do not allow bypassing the above settings“ setzen. Ein Direkt-Push wird danach serverseitig mit `GH006` abgelehnt.",
-  pullRequest: "**Settings → Branches → `main`**: „Require a pull request before merging“ aktivieren.",
-  forcePush: "**Settings → Branches → `main`**: „Allow force pushes“ abschalten.",
-  deletions: "**Settings → Branches → `main`**: „Allow deletions“ abschalten.",
+  "protection-pull-request":
+    "**Settings → Branches → `main`**: „Require a pull request before merging“ aktivieren.",
+  "protection-force-push": "**Settings → Branches → `main`**: „Allow force pushes“ abschalten.",
+  "protection-deletions": "**Settings → Branches → `main`**: „Allow deletions“ abschalten.",
 };
+const FIX_ORDER = Object.keys(FIXES);
 
-function fixesFor({ ruleList, protectionList, protection }) {
-  const fixes = [];
-  if (ruleList.length > 0) {
-    if (ruleList.some((entry) => entry.includes("Pull Request"))) fixes.push(FIXES.rulesPullRequest);
-    if (ruleList.some((entry) => entry.includes("Force-Push"))) fixes.push(FIXES.rulesForcePush);
-    if (ruleList.some((entry) => entry.includes("Löschen von"))) fixes.push(FIXES.rulesDeletion);
-    if (ruleList.some((entry) => entry.includes("Pflicht-Checks"))) fixes.push(FIXES.rulesChecks);
-  }
-  if (protection) {
-    if (protectionList.some((entry) => entry.includes("enforce_admins"))) fixes.push(FIXES.enforceAdmins);
-    if (protectionList.some((entry) => entry.includes("keinen Pull Request"))) fixes.push(FIXES.pullRequest);
-    if (protectionList.some((entry) => entry.includes("Force-Pushes"))) fixes.push(FIXES.forcePush);
-    if (protectionList.some((entry) => entry.includes("Löschen"))) fixes.push(FIXES.deletions);
-  }
-  return [...new Set(fixes)];
+/** Zu den Befundarten die passenden Hinweise — ohne jeden Textvergleich. */
+function fixesFor(findings) {
+  const kinds = new Set(findings.map((finding) => finding.kind));
+  return FIX_ORDER.filter((kind) => kinds.has(kind)).map((kind) => FIXES[kind]);
 }
 
 function buildReport({ ruleList, protectionList, rules, protection, ruleError, blindReason }) {
@@ -248,8 +265,8 @@ function buildReport({ ruleList, protectionList, rules, protection, ruleError, b
   lines.push("");
   lines.push("### Befund");
   lines.push("");
-  for (const entry of ruleList) lines.push(`- ${entry}`);
-  for (const entry of protectionList) lines.push(`- ${entry}`);
+  for (const finding of ruleList) lines.push(`- ${finding.text}`);
+  for (const finding of protectionList) lines.push(`- ${finding.text}`);
   lines.push("");
   lines.push("### Wirksame Regeln (ohne persönliches Token geprüft)");
   lines.push("");
@@ -264,7 +281,7 @@ function buildReport({ ruleList, protectionList, rules, protection, ruleError, b
   lines.push("");
   lines.push("### Was zu tun ist");
   lines.push("");
-  const fixes = fixesFor({ ruleList, protectionList, protection });
+  const fixes = fixesFor([...ruleList, ...protectionList]);
   if (fixes.length === 0) {
     lines.push("Den Zustand in den Repository-Einstellungen prüfen (Settings → Rules und Settings → Branches).");
   } else {
@@ -410,9 +427,12 @@ async function main() {
   const protectionList =
     protectionResult.state === "present" ? protectionFindings(protectionResult.protection) : [];
   if (protectionResult.state === "missing") {
-    protectionList.push(
-      "Die klassische Schutzregel fehlt (`404`) — die zweite Ebene mit `enforce_admins` ist weg.",
-    );
+    // Eigene Art ohne Reparaturhinweis: die Regel wird unter Settings → Branches
+    // neu angelegt, dafür gibt es keinen einzelnen Schalter.
+    protectionList.push({
+      kind: "protection-missing",
+      text: "Die klassische Schutzregel fehlt (`404`) — die zweite Ebene mit `enforce_admins` ist weg.",
+    });
   }
 
   const blindParts = [];
@@ -423,7 +443,7 @@ async function main() {
 
   if (ruleList.length > 0 || protectionList.length > 0) {
     say(`Schutz auf ${BRANCH} ist abgeschwächt:`);
-    for (const entry of [...ruleList, ...protectionList]) say(`  - ${entry.replace(/`/g, "")}`);
+    for (const finding of [...ruleList, ...protectionList]) say(`  - ${finding.text.replace(/`/g, "")}`);
     await publish(
       "weakened",
       buildReport({
@@ -435,7 +455,7 @@ async function main() {
         blindReason,
       }),
       `Weiterhin abgeschwächt (${now()}): ${[...ruleList, ...protectionList]
-        .map((entry) => entry.replace(/`/g, ""))
+        .map((finding) => finding.text.replace(/`/g, ""))
         .join("; ")}`,
     );
     return;
