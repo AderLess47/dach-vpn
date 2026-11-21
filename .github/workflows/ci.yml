@@ -240,6 +240,10 @@ jobs:
   # entfernen — sonst scheitert schon `supabase start` an Port 54324.
   supabase-port-holder:
     name: Host-Netzwerk-Halter auf 54324
+    # Erst nach den beiden anderen Stack-Jobs: so zieht kein dritter Job
+    # gleichzeitig dieselben public.ecr.aws-Images (Rate-/Datenlimit), und der
+    # Halter-Lauf stört den Start der beiden nicht.
+    needs: [auth, dashboard-auth]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
