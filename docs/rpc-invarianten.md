@@ -180,9 +180,20 @@ Lauf beginnt.
 
 1. Branch vom aktuellen `main` abzweigen, z. B.
    `freebuff/mutation-rebind-besitz`.
-2. **Genau eine** Zusicherung entfernen. Beispiel `rebind_device_key`: aus
-   `if not found or v_device.user_id <> p_user_id then` wird
-   `if not found then`.
+2. **Genau eine** Zusicherung entfernen — und zwar in der **letzten** Fassung
+   der Funktion. `create or replace function` in einer späteren Migration
+   überschreibt frühere Definitionen; wer die ältere Datei mutiert, sieht einen
+   grünen Lauf und schließt fälschlich, die Prüfung sei wirkungslos.
+
+   Beispiel `rebind_device_key`: gültig ist die Definition in
+   [0009](../supabase/migrations/20261120090009_entitlement_gate.sql) — die
+   Fassung in `0007` wird von dort überschrieben. Dort wird aus
+   `if not found or v_device.user_id <> p_user_id then`
+   `if not found then`. Welche Definition gilt, zeigt vor dem Push:
+
+   ```sql
+   select pg_get_functiondef('public.rebind_device_key(uuid, uuid, text)'::regprocedure);
+   ```
 3. Committen, pushen und einen Draft-PR gegen `main` öffnen; der Lauf erscheint
    am PR. Erwartet für dieses Beispiel:
    - „IPAM & Registrierung (Integration)" → rot, Schritt „Datenbank-Tests":
@@ -198,9 +209,10 @@ Lauf beginnt.
    Suite nur ein SQL-Fehler und kein Verhaltensbefund.
 4. Branch löschen. Der CI-Lauf bleibt als Beleg in der Historie stehen.
 
-Für andere Funktionen gilt dasselbe Muster: Advisory Lock in `allocate_ip`
-entfernen → Doppelvergabe im Lasttest; `coalesce` im Upsert von
-`apply_subscription_state` auflösen → „Kunden-ID bleibt erhalten" wird rot.
+Für andere Funktionen gilt dasselbe Muster — jeweils in der letzten Fassung:
+Advisory Lock in `allocate_ip` entfernen → Doppelvergabe im Lasttest;
+`coalesce` im Upsert von `apply_subscription_state` auflösen → „Kunden-ID
+bleibt erhalten" wird rot.
 Verschiebt man die Besitzprüfung aus der Funktion in die Route, bleibt der
 E2E-Test grün und nur der DB-Test wird rot — das ist der Grund, warum die
 Prüfung auf RPC-Ebene existiert.
