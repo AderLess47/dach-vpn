@@ -85,7 +85,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        # Vollständig gepinnt (Patch + Alpine-Version): ein gleitender Tag
+        # könnte die DB-Suiten ohne Codeänderung rot machen.
+        image: postgres:16.16-alpine3.24
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: postgres
