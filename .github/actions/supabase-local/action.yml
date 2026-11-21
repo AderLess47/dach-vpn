@@ -15,9 +15,46 @@ runs:
         version: 3.2.0
 
     # `supabase start` spielt supabase/migrations beim ersten Start ein.
+    #
+    # Der Start bricht mit "address already in use" ab, wenn auf dem Runner
+    # noch ein Container (oder dessen docker-proxy) einen der Stack-Ports hält
+    # (54321 API, 54322 DB, 54324 Inbucket). Das ist ein Runner-Zustand, kein
+    # Codefehler: Der Job ist dann rot, bevor ein Test gelaufen ist. Deshalb
+    # vor dem Start aufräumen, den Start begrenzt wiederholen und beim letzten
+    # Fehlschlag die Portbelegung protokollieren — sonst bleibt nur der
+    # CLI-Text, der den Halter des Ports nicht nennt.
     - name: Stack starten
       shell: bash
-      run: supabase start
+      run: |
+        set -euo pipefail
+
+        # Nur die Container dieses Projekts (project_id = dachvpn) entfernen:
+        # `supabase stop` allein erwischt einen halb gestarteten Stack nicht
+        # immer, und ein übrig gebliebener docker-proxy hält den Port weiter.
+        cleanup() {
+          supabase stop --no-backup >/dev/null 2>&1 || true
+          docker ps -aq --filter "name=_dachvpn" | xargs -r docker rm -f >/dev/null 2>&1 || true
+        }
+
+        cleanup
+        started=0
+        for attempt in 1 2 3; do
+          if supabase start; then
+            started=1
+            break
+          fi
+          echo "::warning::supabase start fehlgeschlagen (Versuch $attempt von 3) — Stack aufräumen und erneut versuchen."
+          cleanup
+          sleep $((attempt * 3))
+        done
+
+        if [ "$started" != "1" ]; then
+          echo "::error::supabase start ist dreimal fehlgeschlagen."
+          docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
+          ss -ltnp 2>/dev/null | grep -E ':(54321|54322|54324)\b' \
+            || echo "Kein Listener auf 54321/54322/54324."
+          exit 1
+        fi
 
     # Das Postgres-Image lässt sich nicht in config.toml setzen; es kommt aus
     # dem CLI-Binary. Der Pin oben hält es fest, diese Prüfung macht eine

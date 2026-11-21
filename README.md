@@ -185,7 +185,10 @@ wird von `auth` und `dashboard-auth` genutzt und kapselt alles, was den Stack
 betrifft:
 
 1. `supabase/setup-cli@v3`
-2. `supabase start` — spielt `supabase/migrations` ein
+2. `supabase start` — spielt `supabase/migrations` ein; hält auf dem Runner ein
+   Rest-Container einen der Stack-Ports (54321 API, 54322 DB, 54324 Inbucket),
+   wird der Stack aufgeräumt und der Start bis zu dreimal wiederholt, statt den
+   Job vor dem ersten Test rot zu machen
 3. `supabase status -o env` → Snapshot in `ci-logs/supabase-status.txt` und
    Export nach `$GITHUB_ENV`:
    - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
