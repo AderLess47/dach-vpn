@@ -14,7 +14,7 @@ on:
       - "docs/**"
       - "README.md"
       - "supabase/migrations/**"
-      - "scripts/check-docs.mjs"
+      - "scripts/check-docs-links.mjs"
       - ".github/workflows/docs-links.yml"
   pull_request:
     branches: ["main"]
@@ -29,8 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      # Kein bun install: das Skript nutzt nur Node-Bordmittel. Es prüft die
-      # Links und Anker der Doku samt Migrations-Abdeckung — dieselbe Prüfung,
-      # die auch im CI-Job `quality` läuft.
+      # Kein bun install: das Skript nutzt nur Node-Bordmittel.
       - name: Prüfen
-        run: node scripts/check-docs.mjs
+        run: node scripts/check-docs-links.mjs

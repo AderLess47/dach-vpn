@@ -28,14 +28,13 @@ Millisekunden die Frage, ob README und diese Datei noch dieselben Zahlen
 nennen — und ob die Doku zu den Dateien passt, aus denen die Zahlen stammen.
 Er führt keinen Test aus und braucht kein Netz, keine Datenbank und keinen
 Build: Er liest Text und zählt nach. Quellen sind `README.md`,
-`docs/testing.md`, die beiden Suite-Runner, `vitest.config.ts`, `package.json`,
-die Migrationen samt [`docs/rpc-invarianten.md`](rpc-invarianten.md)
+`docs/testing.md`, die beiden Suite-Runner, `vitest.config.ts`, `package.json`
 und alle YAML-Dateien unter `.github/` (Workflow und Composite-Action); die
 Suiten-Listen, `include`-Muster,
 Skriptnamen und Job-Namen werden aus diesen Dateien gelesen, nicht im Skript
 dupliziert.
 
-Jeder Lauf gibt zwölf Abschnitte in fester Reihenfolge aus, jeder mit einer
+Jeder Lauf gibt elf Abschnitte in fester Reihenfolge aus, jeder mit einer
 Zeile je geprüfter Angabe (`ok` oder `ABW`), und sammelt alle Abweichungen in
 einer Liste. Ist die Liste leer, endet er mit `Alle Zahlangaben stimmen.` und
 Exit 0; sonst gibt er `Abweichungen:` samt Zeilen und dem Hinweis
@@ -116,14 +115,7 @@ Exit 0; sonst gibt er `Abweichungen:` samt Zeilen und dem Hinweis
    umbenannten Abschnitt auf (`README.md: Anker #ci fehlt in README.md`),
    ohne dass jemand die Seite öffnen muss. Jede Datei bekommt eine eigene
    Zeile; Dateien ohne relative Verweise stehen als `keine Links` da.
-11. **Migrationen in der Invarianten-Doku** — jede Datei aus
-   `supabase/migrations/` muss in
-   [`docs/rpc-invarianten.md`](rpc-invarianten.md) verlinkt sein. Dort stehen
-   Zusicherung und prüfender Test je Migration; eine neue Migration ohne Link
-   fällt sonst niemandem auf, weil sie in keiner Zahl auftaucht. Die Prüfung
-   läuft bei jedem Aufruf mit, auch wenn nur einzelne Dokumente geprüft
-   werden, und nennt fehlende Dateien mit Pfad.
-12. **Skripte und Pfade in den Workflows** — in jeder YAML-Datei unter
+11. **Skripte und Pfade in den Workflows** — in jeder YAML-Datei unter
    `.github/` (`.github/workflows/ci.yml` und `action.yml` der
    Composite-Action) muss jedes `bun run <skript>` in den `scripts` eines
    `package.json` im Repo stehen (Root, `apps/*`, `packages/*`), jedes per

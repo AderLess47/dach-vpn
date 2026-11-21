@@ -80,17 +80,15 @@ Gesamtzahlen zu den Einzelzahlen passen, ob es tatsächlich so viele Testdateien
 sind wie die 8 im Text und die `include`-Muster aus `vitest.config.ts` erfassen,
 ob jede Suite der Runner in der Testebenen-Tabelle steht, ob jeder hier und in
 `docs/testing.md` genannte `bun run`-Befehl in `package.json` existiert, ob die
-internen Verweise in allen Markdown-Dateien samt Ankern noch stimmen, ob jede
-Migration aus `supabase/migrations` in
-[`docs/rpc-invarianten.md`](docs/rpc-invarianten.md) verlinkt ist und ob die in
-den Workflows referenzierten Skripte, lokalen Actions und Pfade existieren
+internen Verweise in allen Markdown-Dateien samt Ankern noch stimmen und ob die
+in den Workflows referenzierten Skripte, lokalen Actions und Pfade existieren
 (`bun run <skript>` gegen die `package.json` von Root und Workspaces,
 `scripts/*.mjs` im Dateibaum, `uses: ./…`, `cd`-Ziele).
 Dazu hält er die
 [CI-Tabelle](#ci) an `.github/workflows/ci.yml`: dieselben Jobs samt Zahlwort im
 Satz darüber, die dort laufenden Prüf-Skripte in der Zeile jedes Jobs, die
 Artefaktnamen und die Aufbewahrungsdauer von 7 Tagen. Er läuft als erster
-Schritt im CI-Job `quality`. Die zwölf Abschnitte mit ihren Quellen und den
+Schritt im CI-Job `quality`. Die elf Abschnitte mit ihren Quellen und den
 Grenzen der Prüfung stehen in
 [`docs/testing.md`](docs/testing.md#bun-run-checkdocs).
 
