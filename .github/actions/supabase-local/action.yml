@@ -103,6 +103,36 @@ runs:
           host_network_port_containers "$1"
         }
 
+        # Nach dem Aufräumen begrenzt warten, bis keiner der Stack-Ports mehr
+        # lauscht. Der Halter kann schon tot sein, während sein Listener erst
+        # kurz danach verschwindet; `supabase start` liefe sonst sofort wieder
+        # in "address already in use" und verbrannte einen Versuch. Jeder
+        # Zwischenstand steht im Log, damit die Wartezeit erklärbar bleibt.
+        wait_ports_free() {
+          local limit=20 waited=0 snapshot port busy
+          while :; do
+            snapshot=$(listeners)
+            busy=""
+            for port in "${stack_ports[@]}"; do
+              if printf '%s\n' "$snapshot" | grep -E ":${port}([^0-9]|$)" >/dev/null; then
+                busy+=" $port"
+              fi
+            done
+            if [ -z "$busy" ]; then
+              echo "Stack-Ports frei (${waited}s gewartet): ${stack_ports[*]}"
+              return 0
+            fi
+            if [ "$waited" -ge "$limit" ]; then
+              echo "::warning::Stack-Ports nach ${limit}s noch belegt:$busy — starte trotzdem."
+              printf '%s\n' "$snapshot" | grep -E ':(54321|54322|54324)([^0-9]|$)' || true
+              return 1
+            fi
+            echo "  noch belegt:$busy — warte 1s (${waited}s/${limit}s)"
+            sleep 1
+            waited=$((waited + 1))
+          done
+        }
+
         # Vor dem Aufräumen protokollieren, wer die Ports hält: sonst bleibt
         # beim Fehlschlag nur der CLI-Text, der den Halter nicht nennt.
         report_port_holders() {
@@ -145,6 +175,11 @@ runs:
             echo "Entferne Container auf den Stack-Ports:"
             echo "$ids" | xargs docker rm -f || true
           fi
+
+          # Erst starten, wenn die Ports wirklich frei sind. Läuft die Wartezeit
+          # aus, startet der Versuch trotzdem — die Warnung samt Listenern steht
+          # dann im Log, statt den Grund zu verschweigen.
+          wait_ports_free || true
         }
 
         cleanup
