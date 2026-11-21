@@ -514,7 +514,11 @@ for (const { label, url, text } of documents) {
     if (isImage || /^(https?:|mailto:)/.test(target)) continue;
     links += 1;
     const [targetPath, anchor] = target.split("#");
-    const file = targetPath ? fileURLToPath(new URL(targetPath, url)) : fileURLToPath(url);
+    const file = targetPath
+      ? targetPath.startsWith("/")
+        ? join(ROOT, targetPath)
+        : fileURLToPath(new URL(targetPath, url))
+      : fileURLToPath(url);
     if (!existsSync(file)) {
       broken += 1;
       reportLink(`${label}: Linkziel ${target} existiert nicht`);
@@ -534,6 +538,50 @@ for (const { label, url, text } of documents) {
 }
 if (totalLinks === 0) {
   problems.push("Interne Links: kein einziger relativer Link gefunden");
+}
+
+// --- Jede Migration muss in der Invarianten-Doku stehen -------------------
+// Dort stehen Zusicherung und prüfender Test je Migration; ohne Link fällt
+// eine neue Migration niemandem auf, weil ihre Zahl nirgends auftaucht.
+console.log("\nMigrationen in der Invarianten-Doku");
+const MIGRATIONSDOKU = "docs/rpc-invarianten.md";
+const MIGRATIONSORDNER = join(ROOT, "supabase/migrations");
+const migrations = existsSync(MIGRATIONSORDNER)
+  ? readdirSync(MIGRATIONSORDNER).filter((name) => name.endsWith(".sql")).sort()
+  : [];
+if (migrations.length === 0) {
+  problems.push("supabase/migrations: keine .sql-Datei gefunden");
+}
+const migrationsdokuUrl = new URL(`../${MIGRATIONSDOKU}`, import.meta.url);
+const migrationsdokuText = existsSync(fileURLToPath(migrationsdokuUrl))
+  ? read(migrationsdokuUrl)
+  : "";
+if (migrationsdokuText === "") {
+  problems.push(`${MIGRATIONSDOKU} fehlt oder ist leer`);
+}
+const verlinkteMigrationen = new Set();
+for (const match of stripFences(migrationsdokuText).matchAll(/(!?)\[([^\]]*)\]\(([^)\s]+)\)/g)) {
+  const target = match[3].split("#")[0];
+  if (!target || /^(https?:|mailto:)/.test(target)) continue;
+  const ziel = target.startsWith("/")
+    ? join(ROOT, target)
+    : fileURLToPath(new URL(target, migrationsdokuUrl));
+  verlinkteMigrationen.add(relative(ROOT, ziel).split(sep).join("/"));
+}
+const fehlendeMigrationen = migrations.filter(
+  (name) => !verlinkteMigrationen.has(`supabase/migrations/${name}`),
+);
+for (const name of fehlendeMigrationen) {
+  problems.push(`${MIGRATIONSDOKU}: supabase/migrations/${name} ist nicht verlinkt`);
+}
+const migrationenOk =
+  migrations.length > 0 && migrationsdokuText !== "" && fehlendeMigrationen.length === 0;
+console.log(
+  `  ${migrationenOk ? "ok " : "ABW"} ${migrations.length} Migration(en) · ` +
+    `${migrations.length - fehlendeMigrationen.length}/${migrations.length} in ${MIGRATIONSDOKU} verlinkt`,
+);
+if (!migrationenOk) {
+  for (const name of fehlendeMigrationen) console.log(`      supabase/migrations/${name}`);
 }
 
 // --- Skripte und Pfade, die die Workflows referenzieren -------------------
