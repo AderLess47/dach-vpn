@@ -197,7 +197,9 @@ betrifft:
    Listener im Container selbst. Entfernt werden eigene Reste
    (`name=_dachvpn`) **und fremde Container, die einen dieser Ports halten** —
    sonst scheitert der Versuch genau dann wieder, wenn der    Halter nicht zum Projekt gehört. Bis zu drei Versuche, statt den Job vor dem
-   ersten Test rot zu machen. Das setzt einen für den Job eigenen Runner voraus
+   ersten Test rot zu machen; nach jedem Aufräumen wartet die Action bis zu 20
+   Sekunden, bis 54321/54322/54324 wirklich frei sind, und schreibt das ins Log
+   (`Stack-Ports frei (0s gewartet): …`, sonst `noch belegt: …`). Das setzt einen für den Job eigenen Runner voraus
    (bei GitHub-hosted der Fall); einen Prozess ohne Container protokolliert die
    Action nur, er bleibt als Ursache im Log sichtbar. Der CI-Job
    `supabase-port-holder` stellt den Host-Netzwerk-Fall an einem echten
