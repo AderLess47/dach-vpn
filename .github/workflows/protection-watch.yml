@@ -1,17 +1,22 @@
 name: Schutz-Wächter
 
-# Meldet als Issue, wenn die Admin-Durchsetzung der Branch-Protection auf main
-# aus ist (Direkt-Push wieder möglich, wie beim versehentlichen Commit a352fa8),
-# die Regel ganz fehlt oder der Wächter sie nicht lesen darf.
+# Meldet als Issue, wenn der Direkt-Push-Schutz auf main wegfällt: fehlende
+# oder abgeschaltete Regeln des Repository-Rulesets (Pull-Request-Pflicht, die
+# drei Pflicht-Checks, kein Force-Push, kein Löschen) oder eine abgeschaltete
+# Admin-Durchsetzung der klassischen Regel. Hintergrund ist der versehentliche
+# Direkt-Push a352fa8.
 #
-# Die klassische Branch-Protection ist nur mit Adminrechten lesbar — ohne Auth
-# antwortet `GET /branches/main/protection` mit 401, und das `GITHUB_TOKEN`
-# eines Workflows hat diese Rechte nie. Gelesen wird deshalb
-# `PROTECTION_WATCH_TOKEN` (Fine-grained PAT, nur dieses Repo, „Administration:
-# Read-only"); die Issues schreibt das normale `GITHUB_TOKEN`. Fehlt das
-# Lesetoken, öffnet das Skript ein Issue, das genau dieses Secret benennt —
-# ein stiller grüner Lauf wäre schlimmer als kein Wächter. Anlegen:
-# Settings → Secrets and variables → Actions.
+# Zwei Quellen mit unterschiedlichen Rechten:
+# 1. `GET /rules/branches/main` ist öffentlich lesbar — die Ruleset-Regeln
+#    werden ohne persönliches Token geprüft. Das ist die Ebene, die auch
+#    Admins blockiert, weil die Bypass-Liste leer ist.
+# 2. Die klassische Branch-Protection ist nur mit Adminrechten lesbar (ohne
+#    Auth `401`), das `GITHUB_TOKEN` hat sie nie. Dafür liest der Wächter
+#    `PROTECTION_WATCH_TOKEN` (Fine-grained PAT, nur dieses Repo,
+#    „Administration: Read-only“); die Issues schreibt das `GITHUB_TOKEN`.
+#    Fehlt es, bleibt nur `enforce_admins` ungeprüft und der Wächter sagt das
+#    als Issue — still grün wäre schlimmer. Anlegen: Settings → Secrets and
+#    variables → Actions.
 #
 # schedule und workflow_run laufen nur auf dem Default-Branch; auf
 # Feature-Branches gibt es den Wächter deshalb nicht. workflow_dispatch dient
@@ -49,4 +54,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PROTECTION_WATCH_TOKEN: ${{ secrets.PROTECTION_WATCH_TOKEN }}
           PROTECTION_BRANCH: main
+          # Die Checks, die das Ruleset verlangt — hier gepflegt, damit eine
+          # Umbenennung im Workflow sichtbar wird statt still zu verpuffen.
+          PROTECTION_REQUIRED_CHECKS: |
+            Typecheck, Tests, Build
+            IPAM & Registrierung (Integration)
+            Relative Links in docs/ und README.md
         run: node scripts/protection-watch.mjs
