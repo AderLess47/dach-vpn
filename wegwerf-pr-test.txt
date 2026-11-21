@@ -1,0 +1,1 @@
+Wegwerf-Datei fuer den PR-Test der erzwungenen Branch-Protection.
