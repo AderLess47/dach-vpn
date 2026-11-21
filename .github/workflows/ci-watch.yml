@@ -1,16 +1,24 @@
 name: CI-Wächter
 
-# Prüft einmal täglich den jüngsten CI-Lauf auf main und öffnet bei Rot ein
-# Issue. Die Einordnung (Abrechnungssperre vs. Testfehler) steht im Issue, weil
-# beide unterschiedlich zu beheben sind: bei einer Sperre startet kein Runner,
-# dann ist kein Codefehler zu suchen.
+# Meldet einen roten Lauf auf main als Issue, sobald er fertig ist: workflow_run
+# reagiert auf das Ende von „CI“ und „Doku-Links“, der tägliche Cron bleibt als
+# Netz für Läufe, die gar nicht erst starten (Abrechnungssperre) und für
+# Änderungen an diesem Workflow selbst. Die Einordnung (Abrechnungssperre vs.
+# Testfehler) steht im Issue, weil beide unterschiedlich zu beheben sind: bei
+# einer Sperre startet kein Runner, dann ist kein Codefehler zu suchen.
 #
-# schedule läuft nur auf dem Default-Branch; auf Feature-Branches gibt es den
-# Wächter deshalb nicht. workflow_dispatch dient dem manuellen Prüfen.
+# schedule und workflow_run laufen nur auf dem Default-Branch; auf
+# Feature-Branches gibt es den Wächter deshalb nicht. workflow_dispatch dient
+# dem manuellen Prüfen.
 on:
   schedule:
     # 06:00 UTC, nach dem üblichen Tageslauf und vor dem Arbeitsbeginn in Europa.
     - cron: "0 6 * * *"
+  workflow_run:
+    # Namen wie in `name:` der beiden Workflows, nicht die Dateinamen.
+    workflows: ["CI", "Doku-Links"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -25,7 +33,7 @@ concurrency:
 
 jobs:
   watch:
-    name: Roten CI-Lauf auf main melden
+    name: Roten Lauf auf main melden
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -34,6 +42,6 @@ jobs:
       - name: Prüfen
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI_WORKFLOW: ci.yml
+          CI_WORKFLOWS: ci.yml,docs-links.yml
           CI_BRANCH: main
         run: node scripts/ci-watch.mjs
